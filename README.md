@@ -69,14 +69,25 @@ DB_PORT=5432
 DB_USERNAME=postgres
 DB_PASSWORD=tu_password
 DB_DATABASE=ligas_barriales
+DB_SYNCHRONIZE=true
 JWT_SECRET=tu_secret_key_cambiar_en_produccion
 ```
 
-3. Asegurarse de que la base de datos PostgreSQL esté corriendo y ejecutar el script SQL para crear las tablas:
-```bash
-# Usar pgAdmin o psql para ejecutar el script
-# sql_inicial_ligas_barriales.sql
-```
+**⚡ Inicialización automática:**
+- Al arrancar por primera vez, el backend automáticamente:
+  - ✅ Crea todas las tablas basadas en las entities de TypeORM (15 tablas en total)
+  - ✅ Crea los 3 roles básicos (master, directivo_liga, dirigente_equipo)
+  - ✅ Crea el usuario administrador con credenciales por defecto
+- Si las tablas ya existen, las respeta y no sobrescribe datos
+
+**🔐 Usuario admin creado automáticamente:**
+- Email: `admin@ligasbarriales.com`
+- Contraseña: `password123`
+- ⚠️ **IMPORTANTE:** Cambiar la contraseña después del primer inicio de sesión
+
+3. Asegurarse de que PostgreSQL esté corriendo:
+- La base de datos se creará automáticamente si no existe
+- No es necesario ejecutar scripts SQL manualmente
 
 4. Iniciar el servidor en modo desarrollo:
 ```bash
@@ -113,11 +124,10 @@ Content-Type: application/json
 }
 ```
 
-**Usuario inicial para pruebas:**
+**Usuario inicial (creado automáticamente al arrancar):**
 - Email: `admin@ligasbarriales.com`
 - Contraseña: `password123`
-
-Para crear este usuario, ejecuta el script: `backend/scripts/create-admin-user.sql`
+- ⚠️ **IMPORTANTE:** Cambiar la contraseña después del primer inicio de sesión por seguridad
 
 Respuesta:
 ```json

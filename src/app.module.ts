@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DatabaseConfig } from './config/database.config';
+import { DatabaseSeedService } from './config/database-seed.service';
 import { AuthModule } from './modules/auth/auth.module';
 import { LigasModule } from './modules/ligas/ligas.module';
 import { EquiposModule } from './modules/equipos/equipos.module';
@@ -12,6 +13,8 @@ import { CategoriasModule } from './modules/categorias/categorias.module';
 import { InscripcionesModule } from './modules/inscripciones/inscripciones.module';
 import { JugadorCampeonatosModule } from './modules/jugador-campeonatos/jugador-campeonatos.module';
 import { TransferenciasModule } from './modules/transferencias/transferencias.module';
+import { Rol } from './modules/auth/entities/rol.entity';
+import { Usuario } from './modules/auth/entities/usuario.entity';
 
 /**
  * Módulo raíz de la aplicación
@@ -30,6 +33,9 @@ import { TransferenciasModule } from './modules/transferencias/transferencias.mo
       useClass: DatabaseConfig,
     }),
 
+    // Importar entities necesarias para el seed
+    TypeOrmModule.forFeature([Rol, Usuario]),
+
     // Módulos de la aplicación
     AuthModule,
     LigasModule,
@@ -42,5 +48,6 @@ import { TransferenciasModule } from './modules/transferencias/transferencias.mo
     JugadorCampeonatosModule,
     TransferenciasModule,
   ],
+  providers: [DatabaseSeedService],
 })
 export class AppModule {}
