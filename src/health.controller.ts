@@ -10,13 +10,4 @@ export class HealthController {
       uptime: process.uptime(),
     };
   }
-
-  @Get('api/health')
-  apiHealth() {
-    return {
-      status: 'ok',
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-    };
-  }
 }
