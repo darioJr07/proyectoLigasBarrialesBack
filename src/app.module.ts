@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DatabaseConfig } from './config/database.config';
 import { DatabaseSeedService } from './config/database-seed.service';
+import { HealthController } from './health.controller';
 import { AuthModule } from './modules/auth/auth.module';
 import { LigasModule } from './modules/ligas/ligas.module';
 import { EquiposModule } from './modules/equipos/equipos.module';
@@ -48,6 +49,7 @@ import { Usuario } from './modules/auth/entities/usuario.entity';
     JugadorCampeonatosModule,
     TransferenciasModule,
   ],
+  controllers: [HealthController],
   providers: [DatabaseSeedService],
 })
 export class AppModule {}
