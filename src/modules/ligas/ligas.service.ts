@@ -106,6 +106,7 @@ export class LigasService {
     // Master ve todas las ligas
     if (rolNombre === 'master') {
       return await this.ligaRepository.find({
+        relations: ['directivo'],
         order: { nombre: 'ASC' },
       });
     }
@@ -119,6 +120,7 @@ export class LigasService {
 
       const liga = await this.ligaRepository.findOne({
         where: { id: usuario.ligaId },
+        relations: ['directivo'],
       });
 
       return liga ? [liga] : [];
@@ -134,6 +136,7 @@ export class LigasService {
   async findActive(): Promise<Liga[]> {
     return await this.ligaRepository.find({
       where: { activo: true },
+      relations: ['directivo'],
       order: { nombre: 'ASC' },
     });
   }
@@ -144,6 +147,7 @@ export class LigasService {
   async findOne(id: number): Promise<Liga> {
     const liga = await this.ligaRepository.findOne({
       where: { id },
+      relations: ['directivo'],
     });
 
     if (!liga) {

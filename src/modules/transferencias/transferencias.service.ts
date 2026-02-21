@@ -28,6 +28,25 @@ export class TransferenciasService {
     private inscripcionRepo: Repository<Inscripcion>,
   ) {}
 
+  /**
+   * Helper para serializar transferencias con campos virtuales del jugador
+   */
+  private serializeTransferencia(transferencia: Transferencia): any {
+    const serialized = { ...transferencia };
+    if (transferencia.jugador) {
+      serialized.jugador = {
+        ...transferencia.jugador,
+        nombreCompleto: transferencia.jugador.nombre,
+        fotoPerfil: transferencia.jugador.imagen,
+      };
+    }
+    return serialized;
+  }
+
+  private serializeTransferencias(transferencias: Transferencia[]): any[] {
+    return transferencias.map(t => this.serializeTransferencia(t));
+  }
+
   async create(dto: CreateTransferenciaDto, usuario: any): Promise<Transferencia> {
     // 1. Verificar que el campeonato existe
     const campeonato = await this.campeonatoRepo.findOne({
@@ -172,7 +191,16 @@ export class TransferenciasService {
       observaciones: dto.observaciones,
     });
 
-    return await this.transferenciaRepo.save(transferencia);
+    const saved = await this.transferenciaRepo.save(transferencia);
+    // Cargar relaciones para serialización
+    const loaded = await this.transferenciaRepo.findOne({
+      where: { id: saved.id },
+      relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
+    });
+    if (!loaded) {
+      throw new NotFoundException('Error al cargar la transferencia creada');
+    }
+    return this.serializeTransferencia(loaded);
   }
 
   async aprobarPorEquipoOrigen(id: number, dto: AprobarTransferenciaDto, usuario: any): Promise<Transferencia> {
@@ -213,7 +241,15 @@ export class TransferenciasService {
       await this.completarTransferencia(result);
     }
 
-    return result;
+    // Cargar relaciones para serialización
+    const loaded = await this.transferenciaRepo.findOne({
+      where: { id: result.id },
+      relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
+    });
+    if (!loaded) {
+      throw new NotFoundException('Error al cargar la transferencia');
+    }
+    return this.serializeTransferencia(loaded);
   }
 
   async rechazarPorEquipoOrigen(id: number, dto: RechazarTransferenciaDto, usuario: any): Promise<Transferencia> {
@@ -241,7 +277,16 @@ export class TransferenciasService {
     transferencia.fechaAprobacionOrigen = new Date();
     transferencia.observaciones = dto.observaciones;
 
-    return await this.transferenciaRepo.save(transferencia);
+    const result = await this.transferenciaRepo.save(transferencia);
+    // Cargar relaciones para serialización
+    const loaded = await this.transferenciaRepo.findOne({
+      where: { id: result.id },
+      relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
+    });
+    if (!loaded) {
+      throw new NotFoundException('Error al cargar la transferencia');
+    }
+    return this.serializeTransferencia(loaded);
   }
 
   async aprobarPorDirectivo(id: number, dto: AprobarTransferenciaDto, usuario: any): Promise<Transferencia> {
@@ -287,7 +332,15 @@ export class TransferenciasService {
       await this.completarTransferencia(result);
     }
 
-    return result;
+    // Cargar relaciones para serialización
+    const loaded = await this.transferenciaRepo.findOne({
+      where: { id: result.id },
+      relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
+    });
+    if (!loaded) {
+      throw new NotFoundException('Error al cargar la transferencia');
+    }
+    return this.serializeTransferencia(loaded);
   }
 
   async rechazarPorDirectivo(id: number, dto: RechazarTransferenciaDto, usuario: any): Promise<Transferencia> {
@@ -320,7 +373,16 @@ export class TransferenciasService {
     transferencia.fechaAprobacionDirectivo = new Date();
     transferencia.observaciones = (transferencia.observaciones || '') + ' ' + dto.observaciones;
 
-    return await this.transferenciaRepo.save(transferencia);
+    const result = await this.transferenciaRepo.save(transferencia);
+    // Cargar relaciones para serialización
+    const loaded = await this.transferenciaRepo.findOne({
+      where: { id: result.id },
+      relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
+    });
+    if (!loaded) {
+      throw new NotFoundException('Error al cargar la transferencia');
+    }
+    return this.serializeTransferencia(loaded);
   }
 
   private async completarTransferencia(transferencia: Transferencia): Promise<void> {
@@ -362,7 +424,7 @@ export class TransferenciasService {
     console.log(`===============================================\n`);
   }
 
-  async findAll(usuario: any): Promise<Transferencia[]> {
+  async findAll(usuario: any): Promise<any[]> {
     const whereCondition: any = { activo: true };
 
     // Filtrar según rol
@@ -370,24 +432,29 @@ export class TransferenciasService {
       whereCondition.campeonato = { ligaId: usuario.ligaId };
     } else if (usuario.role === 'dirigente_equipo' && usuario.equipoId) {
       // Ver transferencias donde es origen o destino
-      return await this.transferenciaRepo.find({
+      const transferencias = await this.transferenciaRepo.find({
         where: [
           { equipoOrigenId: usuario.equipoId, activo: true },
           { equipoDestinoId: usuario.equipoId, activo: true },
         ],
+        relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
         order: { fechaSolicitud: 'DESC' },
       });
+      return this.serializeTransferencias(transferencias);
     }
 
-    return await this.transferenciaRepo.find({
+    const transferencias = await this.transferenciaRepo.find({
       where: whereCondition,
+      relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
       order: { fechaSolicitud: 'DESC' },
     });
+    return this.serializeTransferencias(transferencias);
   }
 
-  async findOne(id: number, usuario: any): Promise<Transferencia> {
+  async findOne(id: number, usuario: any): Promise<any> {
     const transferencia = await this.transferenciaRepo.findOne({
       where: { id, activo: true },
+      relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
     });
 
     if (!transferencia) {
@@ -408,25 +475,27 @@ export class TransferenciasService {
       }
     }
 
-    return transferencia;
+    return this.serializeTransferencia(transferencia);
   }
 
-  async findPendientesEquipoOrigen(usuario: any): Promise<Transferencia[]> {
+  async findPendientesEquipoOrigen(usuario: any): Promise<any[]> {
     if (usuario.role !== 'dirigente_equipo' || !usuario.equipoId) {
       throw new ForbiddenException('Solo dirigentes pueden ver transferencias pendientes de su equipo');
     }
 
-    return await this.transferenciaRepo.find({
+    const transferencias = await this.transferenciaRepo.find({
       where: {
         equipoOrigenId: usuario.equipoId,
         estadoEquipoOrigen: 'pendiente',
         activo: true,
       },
+      relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
       order: { fechaSolicitud: 'ASC' },
     });
+    return this.serializeTransferencias(transferencias);
   }
 
-  async findPendientesDirectivo(usuario: any): Promise<Transferencia[]> {
+  async findPendientesDirectivo(usuario: any): Promise<any[]> {
     if (usuario.role !== 'master' && usuario.role !== 'directivo_liga') {
       throw new ForbiddenException('Solo directivos pueden ver transferencias pendientes');
     }
@@ -441,28 +510,33 @@ export class TransferenciasService {
       whereCondition.campeonato = { ligaId: usuario.ligaId };
     }
 
-    return await this.transferenciaRepo.find({
+    const transferencias = await this.transferenciaRepo.find({
       where: whereCondition,
+      relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
       order: { fechaSolicitud: 'ASC' },
     });
+    return this.serializeTransferencias(transferencias);
   }
 
-  async findByCampeonato(campeonatoId: number, usuario: any): Promise<Transferencia[]> {
+  async findByCampeonato(campeonatoId: number, usuario: any): Promise<any[]> {
     const whereCondition: any = { campeonatoId, activo: true };
 
     // Filtrar según rol
     if (usuario.role === 'dirigente_equipo' && usuario.equipoId) {
-      return await this.transferenciaRepo.find({
+      const transferencias = await this.transferenciaRepo.find({
         where: [
           { campeonatoId, equipoOrigenId: usuario.equipoId, activo: true },
           { campeonatoId, equipoDestinoId: usuario.equipoId, activo: true },
         ],
+        relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
         order: { fechaSolicitud: 'DESC' },
       });
+      return this.serializeTransferencias(transferencias);
     }
 
     const transferencias = await this.transferenciaRepo.find({
       where: whereCondition,
+      relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
       order: { fechaSolicitud: 'DESC' },
     });
 
@@ -474,14 +548,16 @@ export class TransferenciasService {
       }
     }
 
-    return transferencias;
+    return this.serializeTransferencias(transferencias);
   }
 
-  async findByJugador(jugadorId: number): Promise<Transferencia[]> {
-    return await this.transferenciaRepo.find({
+  async findByJugador(jugadorId: number): Promise<any[]> {
+    const transferencias = await this.transferenciaRepo.find({
       where: { jugadorId, activo: true },
+      relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
       order: { fechaSolicitud: 'DESC' },
     });
+    return this.serializeTransferencias(transferencias);
   }
 
   async cancelar(id: number, usuario: any): Promise<void> {

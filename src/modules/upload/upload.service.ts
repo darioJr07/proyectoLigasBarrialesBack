@@ -1,81 +1,69 @@
-import { Injectable } from '@nestjs/common';
-import * as fs from 'fs';
-import * as path from 'path';
+import { Injectable, Inject } from '@nestjs/common';
+import { IStorageService } from './interfaces/storage.interface';
 
 @Injectable()
 export class UploadService {
-  private readonly uploadBasePath = path.join(
-    process.cwd(),
-    'src',
-    'public',
-    'uploads',
-  );
+  constructor(
+    @Inject('STORAGE_SERVICE')
+    private readonly storageService: IStorageService,
+  ) {}
 
   /**
-   * Crea la estructura de carpetas necesaria para almacenar un archivo
+   * Genera la carpeta virtual según el tipo de entidad y la liga
    * @param ligaId ID de la liga (null para jugadores sin liga)
    * @param tipo Tipo de entidad: 'liga', 'equipo', 'jugador', 'cedula'
-   * @returns Ruta completa donde se guardará el archivo
+   * @returns Ruta de carpeta para almacenamiento
    */
-  createUploadPath(ligaId: number | null, tipo: 'liga' | 'equipo' | 'jugador' | 'cedula'): string {
-    let uploadPath = '';
+  getFolderPath(ligaId: number | null, tipo: 'liga' | 'equipo' | 'jugador' | 'cedula'): string {
+    let folderPath = '';
 
     if (tipo === 'liga') {
-      // Logo de liga se guarda en: uploads/liga-X/logo.jpg
-      uploadPath = path.join(this.uploadBasePath, `liga-${ligaId}`);
+      // Logo de liga se guarda en: liga-X/
+      folderPath = `liga-${ligaId}`;
     } else if (tipo === 'equipo') {
-      // Escudo de equipo se guarda en: uploads/liga-X/equipos/
-      uploadPath = path.join(this.uploadBasePath, `liga-${ligaId}`, 'equipos');
+      // Escudo de equipo se guarda en: liga-X/equipos/
+      folderPath = `liga-${ligaId}/equipos`;
     } else if (tipo === 'jugador') {
-      // Foto de jugador se guarda en: uploads/liga-X/jugadores/ o uploads/sin-liga/jugadores/
+      // Foto de jugador se guarda en: liga-X/jugadores/ o sin-liga/jugadores/
       if (ligaId) {
-        uploadPath = path.join(this.uploadBasePath, `liga-${ligaId}`, 'jugadores');
+        folderPath = `liga-${ligaId}/jugadores`;
       } else {
-        uploadPath = path.join(this.uploadBasePath, 'sin-liga', 'jugadores');
+        folderPath = 'sin-liga/jugadores';
       }
     } else if (tipo === 'cedula') {
-      // Imagen de cédula se guarda en: uploads/liga-X/cedulas-jugadores/ o uploads/sin-liga/cedulas-jugadores/
+      // Imagen de cédula se guarda en: liga-X/cedulas-jugadores/ o sin-liga/cedulas-jugadores/
       if (ligaId) {
-        uploadPath = path.join(this.uploadBasePath, `liga-${ligaId}`, 'cedulas-jugadores');
+        folderPath = `liga-${ligaId}/cedulas-jugadores`;
       } else {
-        uploadPath = path.join(this.uploadBasePath, 'sin-liga', 'cedulas-jugadores');
+        folderPath = 'sin-liga/cedulas-jugadores';
       }
     }
 
-    // Crear carpetas si no existen
-    if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath, { recursive: true });
-    }
-
-    return uploadPath;
+    return folderPath;
   }
 
   /**
-   * Genera la URL pública para acceder al archivo
+   * Sube una imagen usando el servicio de almacenamiento configurado
+   * @param file Archivo a subir
    * @param ligaId ID de la liga
    * @param tipo Tipo de entidad
-   * @param filename Nombre del archivo
-   * @returns URL relativa para acceder al archivo
+   * @returns URL pública de la imagen
    */
-  getPublicUrl(ligaId: number | null, tipo: 'liga' | 'equipo' | 'jugador' | 'cedula', filename: string): string {
-    if (tipo === 'liga') {
-      return `/uploads/liga-${ligaId}/${filename}`;
-    } else if (tipo === 'equipo') {
-      return `/uploads/liga-${ligaId}/equipos/${filename}`;
-    } else if (tipo === 'jugador') {
-      if (ligaId) {
-        return `/uploads/liga-${ligaId}/jugadores/${filename}`;
-      } else {
-        return `/uploads/sin-liga/jugadores/${filename}`;
-      }
-    } else if (tipo === 'cedula') {
-      if (ligaId) {
-        return `/uploads/liga-${ligaId}/cedulas-jugadores/${filename}`;
-      } else {
-        return `/uploads/sin-liga/cedulas-jugadores/${filename}`;
-      }
-    }
-    return '';
+  async uploadImage(
+    file: Express.Multer.File,
+    ligaId: number | null,
+    tipo: 'liga' | 'equipo' | 'jugador' | 'cedula',
+  ): Promise<string> {
+    const folder = this.getFolderPath(ligaId, tipo);
+    return await this.storageService.uploadImage(file, folder);
+  }
+
+  /**
+   * Elimina una imagen usando el servicio de almacenamiento configurado
+   * @param url URL de la imagen a eliminar
+   */
+  async deleteImage(url: string): Promise<void> {
+    await this.storageService.deleteImage(url);
   }
 
   /**
@@ -84,7 +72,6 @@ export class UploadService {
    * @returns true si es válido
    */
   validateImageFile(mimetype: string): boolean {
-    const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-    return allowedMimeTypes.includes(mimetype);
+    return this.storageService.validateImageFile(mimetype);
   }
 }

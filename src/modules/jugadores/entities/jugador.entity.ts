@@ -20,6 +20,11 @@ export class Jugador {
   @Column({ type: 'varchar', length: 100 })
   nombre: string;
 
+  // Propiedad virtual para compatibilidad con frontend
+  get nombreCompleto(): string {
+    return this.nombre;
+  }
+
   @Column({ name: 'fecha_nacimiento', type: 'date', nullable: true })
   fechaNacimiento: Date;
 
@@ -38,6 +43,11 @@ export class Jugador {
 
   @Column({ type: 'varchar', length: 500, nullable: true })
   imagen: string;
+
+  // Propiedad virtual para compatibilidad con frontend
+  get fotoPerfil(): string {
+    return this.imagen;
+  }
 
   @Column({ name: 'imagen_cedula', type: 'varchar', length: 500, nullable: true })
   imagenCedula: string;

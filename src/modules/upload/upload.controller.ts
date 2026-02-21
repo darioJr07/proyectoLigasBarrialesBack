@@ -56,7 +56,7 @@ export class UploadController {
       },
     }),
   )
-  uploadFile(
+  async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body('ligaId') ligaId: string,
     @Body('tipo') tipo: 'liga' | 'equipo' | 'jugador' | 'cedula',
@@ -71,17 +71,8 @@ export class UploadController {
 
     const ligaIdNumber = ligaId ? parseInt(ligaId) : null;
 
-    // Crear el path de destino final usando el servicio
-    const finalPath = this.uploadService.createUploadPath(ligaIdNumber, tipo);
-    
-    // Mover archivo de temp a ubicación final
-    const tempFilePath = file.path;
-    const finalFilePath = join(finalPath, file.filename);
-    
-    fs.renameSync(tempFilePath, finalFilePath);
-    console.log(`✅ Archivo movido: ${tempFilePath} → ${finalFilePath}`);
-
-    const publicUrl = this.uploadService.getPublicUrl(ligaIdNumber, tipo, file.filename);
+    // Subir la imagen usando el servicio de almacenamiento configurado
+    const publicUrl = await this.uploadService.uploadImage(file, ligaIdNumber, tipo);
 
     return {
       message: 'Archivo subido exitosamente',
