@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   IsIn,
+  IsDateString,
 } from 'class-validator';
 
 export class CreateInscripcionDto {
@@ -18,6 +19,10 @@ export class CreateInscripcionDto {
   @IsNotEmpty({ message: 'El equipo es obligatorio' })
   @IsInt()
   equipoId: number;
+
+  @IsOptional()
+  @IsDateString()
+  fechaInscripcion?: string;
 
   @IsOptional()
   @IsString()

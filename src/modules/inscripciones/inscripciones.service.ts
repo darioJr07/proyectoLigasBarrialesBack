@@ -49,8 +49,12 @@ export class InscripcionesService {
       );
     }
 
-    // Validar fecha límite de inscripción
-    if (new Date() > new Date(campeonato.fechaLimiteInscripcion)) {
+    // Validar fecha límite de inscripción usando la fecha proporcionada o la actual
+    const fechaInscripcionToCheck = createInscripcionDto.fechaInscripcion 
+      ? new Date(createInscripcionDto.fechaInscripcion) 
+      : new Date();
+    
+    if (fechaInscripcionToCheck > new Date(campeonato.fechaLimiteInscripcion)) {
       throw new BadRequestException(
         'La fecha límite de inscripción ha expirado',
       );
@@ -135,7 +139,9 @@ export class InscripcionesService {
       inscripcionRechazada.categoriaId = createInscripcionDto.categoriaId;
       inscripcionRechazada.estado = usuario.role === 'directivo_liga' ? 'confirmada' : 'pendiente';
       inscripcionRechazada.observaciones = createInscripcionDto.observaciones || '';
-      inscripcionRechazada.fechaInscripcion = new Date();
+      inscripcionRechazada.fechaInscripcion = createInscripcionDto.fechaInscripcion 
+        ? new Date(createInscripcionDto.fechaInscripcion) 
+        : new Date();
       
       return await this.inscripcionesRepository.save(inscripcionRechazada);
     }
@@ -144,6 +150,9 @@ export class InscripcionesService {
     const inscripcion = this.inscripcionesRepository.create({
       ...createInscripcionDto,
       estado: usuario.role === 'directivo_liga' ? 'confirmada' : 'pendiente',
+      fechaInscripcion: createInscripcionDto.fechaInscripcion 
+        ? new Date(createInscripcionDto.fechaInscripcion) 
+        : new Date(),
     });
 
     return await this.inscripcionesRepository.save(inscripcion);
