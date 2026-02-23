@@ -75,4 +75,18 @@ export class CampeonatosController {
   remove(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
     return this.campeonatosService.remove(id, req.user);
   }
+
+  @Post('actualizar-estados')
+  @Roles('master')
+  @HttpCode(HttpStatus.OK)
+  actualizarEstadosMasivo(@Request() req: any) {
+    return this.campeonatosService.actualizarEstadosMasivo(req.user);
+  }
+
+  @Post('corregir-estados')
+  @Roles('master')
+  @HttpCode(HttpStatus.OK)
+  corregirEstados(@Request() req: any) {
+    return this.campeonatosService.corregirEstados(req.user);
+  }
 }
