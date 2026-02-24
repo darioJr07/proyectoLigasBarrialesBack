@@ -25,6 +25,16 @@ export class CreateLigaDto {
   imagen?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(150, { message: 'El correo no puede exceder 150 caracteres' })
+  correo?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20, { message: 'El teléfono no puede exceder 20 caracteres' })
+  telefono?: string;
+
+  @IsOptional()
   @IsNumber({}, { message: 'El ID del directivo debe ser un número' })
   directivoId?: number;
 }

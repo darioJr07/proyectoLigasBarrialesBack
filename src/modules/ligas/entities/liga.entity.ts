@@ -30,6 +30,12 @@ export class Liga {
   @Column({ type: 'varchar', length: 500, nullable: true })
   imagen: string;
 
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  correo: string;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  telefono: string;
+
   @ManyToOne(() => Usuario, { eager: true, nullable: true })
   @JoinColumn({ name: 'directivo_id' })
   directivo: Usuario;
