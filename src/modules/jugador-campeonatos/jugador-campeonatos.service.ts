@@ -129,6 +129,42 @@ export class JugadorCampeonatosService {
 
     // Si existe una habilitación inactiva/rechazada, reutilizarla actualizando sus datos
     if (inscripcionExistente && !inscripcionExistente.activo) {
+      // Validar límite de jugadores habilitados antes de reactivar
+      const maxJugadores = campeonato.maxJugadoresHabilitados || 20;
+      const habilitadosCount = await this.jugadorCampeonatoRepo.count({
+        where: {
+          campeonatoId: dto.campeonatoId,
+          equipoId: dto.equipoId,
+          estado: 'habilitado',
+          activo: true,
+        },
+      });
+
+      if (habilitadosCount >= maxJugadores) {
+        throw new BadRequestException(
+          `Ya se alcanzó el límite de ${maxJugadores} jugadores habilitados para este equipo en este campeonato. ` +
+          `Si necesita habilitar a otro jugador, debe solicitar al directivo que libere un cupo primero.`
+        );
+      }
+
+      // Validar que el número de camiseta no esté en uso por otro jugador
+      if (dto.numeroCancha) {
+        const numeroDuplicado = await this.jugadorCampeonatoRepo.findOne({
+          where: {
+            campeonatoId: dto.campeonatoId,
+            equipoId: dto.equipoId,
+            numeroCancha: dto.numeroCancha,
+            activo: true,
+          },
+        });
+
+        if (numeroDuplicado && numeroDuplicado.jugadorId !== dto.jugadorId) {
+          throw new BadRequestException(
+            `El número de camiseta ${dto.numeroCancha} ya está asignado a otro jugador en este campeonato y equipo`
+          );
+        }
+      }
+
       inscripcionExistente.equipoId = dto.equipoId;
       inscripcionExistente.categoriaId = dto.categoriaId;
       inscripcionExistente.numeroCancha = dto.numeroCancha;
@@ -144,7 +180,43 @@ export class JugadorCampeonatosService {
       return await this.jugadorCampeonatoRepo.save(inscripcionExistente);
     }
 
-    // 10. Crear nueva inscripción con estado pendiente
+    // 10. Validar límite de jugadores habilitados para nueva inscripción
+    const maxJugadores = campeonato.maxJugadoresHabilitados || 20;
+    const habilitadosCount = await this.jugadorCampeonatoRepo.count({
+      where: {
+        campeonatoId: dto.campeonatoId,
+        equipoId: dto.equipoId,
+        estado: 'habilitado',
+        activo: true,
+      },
+    });
+
+    if (habilitadosCount >= maxJugadores) {
+      throw new BadRequestException(
+        `Ya se alcanzó el límite de ${maxJugadores} jugadores habilitados para este equipo en este campeonato. ` +
+        `Si necesita habilitar a otro jugador, debe solicitar al directivo que libere un cupo primero.`
+      );
+    }
+
+    // Validar que el número de camiseta no esté en uso por otro jugador
+    if (dto.numeroCancha) {
+      const numeroDuplicado = await this.jugadorCampeonatoRepo.findOne({
+        where: {
+          campeonatoId: dto.campeonatoId,
+          equipoId: dto.equipoId,
+          numeroCancha: dto.numeroCancha,
+          activo: true,
+        },
+      });
+
+      if (numeroDuplicado) {
+        throw new BadRequestException(
+          `El número de camiseta ${dto.numeroCancha} ya está asignado a otro jugador en este campeonato y equipo`
+        );
+      }
+    }
+
+    // 11. Crear nueva inscripción con estado pendiente
     const jugadorCampeonato = this.jugadorCampeonatoRepo.create({
       ...dto,
       estado: 'pendiente',
@@ -313,6 +385,24 @@ export class JugadorCampeonatosService {
 
   async update(id: number, dto: UpdateJugadorCampeonatoDto, usuario: any): Promise<JugadorCampeonato> {
     const jugadorCampeonato = await this.findOne(id, usuario);
+
+    // Validar número de camiseta duplicado si se está actualizando
+    if (dto.numeroCancha !== undefined && dto.numeroCancha !== jugadorCampeonato.numeroCancha) {
+      const numeroDuplicado = await this.jugadorCampeonatoRepo.findOne({
+        where: {
+          campeonatoId: jugadorCampeonato.campeonatoId,
+          equipoId: jugadorCampeonato.equipoId,
+          numeroCancha: dto.numeroCancha,
+          activo: true,
+        },
+      });
+
+      if (numeroDuplicado && numeroDuplicado.id !== id) {
+        throw new BadRequestException(
+          `El número de camiseta ${dto.numeroCancha} ya está asignado a otro jugador en este campeonato y equipo`
+        );
+      }
+    }
 
     // Solo permitir actualizar numeroCancha y posicion
     if (dto.numeroCancha !== undefined) {

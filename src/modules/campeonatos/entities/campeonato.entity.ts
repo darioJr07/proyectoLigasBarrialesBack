@@ -52,6 +52,14 @@ export class Campeonato {
   @Column({ type: 'boolean', default: true })
   activo: boolean;
 
+  @Column({
+    name: 'max_jugadores_habilitados',
+    type: 'int',
+    nullable: true,
+    default: 20,
+  })
+  maxJugadoresHabilitados: number;
+
   @CreateDateColumn({ name: 'creado_en' })
   creadoEn: Date;
 

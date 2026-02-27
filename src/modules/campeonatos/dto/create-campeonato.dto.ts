@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsInt,
   IsIn,
+  Min,
 } from 'class-validator';
 
 export class CreateCampeonatoDto {
@@ -38,4 +39,9 @@ export class CreateCampeonatoDto {
   @IsString()
   @IsIn(['inscripcion_abierta', 'en_curso', 'finalizado', 'cancelado'])
   estado?: 'inscripcion_abierta' | 'en_curso' | 'finalizado' | 'cancelado';
+
+  @IsOptional()
+  @IsInt({ message: 'El máximo de jugadores habilitados debe ser un número entero' })
+  @Min(1, { message: 'El máximo de jugadores habilitados debe ser al menos 1' })
+  maxJugadoresHabilitados?: number;
 }

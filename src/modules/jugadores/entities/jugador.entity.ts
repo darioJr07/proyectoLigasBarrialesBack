@@ -31,6 +31,9 @@ export class Jugador {
   @Column({ type: 'varchar', length: 20, nullable: true, unique: true })
   cedula: string;
 
+  @Column({ name: 'tipo_documento', type: 'varchar', length: 20, default: 'Cédula' })
+  tipoDocumento: string;
+
   @Column({ name: 'equipo_id', type: 'int', nullable: true })
   equipoId: number | null;
 
