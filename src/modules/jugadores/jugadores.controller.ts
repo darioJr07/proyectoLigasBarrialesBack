@@ -29,6 +29,7 @@ export class JugadoresController {
       createJugadorDto,
       req.user.userId,
       req.user.role,
+      req.user.ligaId,
     );
   }
 
@@ -63,6 +64,7 @@ export class JugadoresController {
       updateJugadorDto,
       req.user.userId,
       req.user.role,
+      req.user.ligaId,
     );
   }
 

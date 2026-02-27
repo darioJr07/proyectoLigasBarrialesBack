@@ -32,6 +32,7 @@ export class JugadoresService {
     createJugadorDto: CreateJugadorDto,
     userId?: number,
     userRole?: string,
+    userLigaId?: number,
   ): Promise<Jugador> {
     const { equipoId, cedula, ...jugadorData } = createJugadorDto;
 
@@ -56,11 +57,22 @@ export class JugadoresService {
         throw new NotFoundException('Equipo no encontrado');
       }
 
-      // Solo master o dirigente del equipo pueden asignar jugadores
-      if (userId && userRole && userRole !== 'master' && equipo.dirigenteId !== userId) {
-        throw new ForbiddenException(
-          'No tienes permisos para asignar jugadores a este equipo',
-        );
+      // Validar permisos según rol
+      if (userId && userRole && userRole !== 'master') {
+        // Directivo de liga puede crear jugadores para equipos de su liga
+        if (userRole === 'directivo_liga') {
+          if (!userLigaId || equipo.ligaId !== userLigaId) {
+            throw new ForbiddenException(
+              'No tienes permisos para asignar jugadores a equipos de otras ligas',
+            );
+          }
+        }
+        // Dirigente de equipo solo puede crear jugadores para su equipo
+        else if (equipo.dirigenteId !== userId) {
+          throw new ForbiddenException(
+            'No tienes permisos para asignar jugadores a este equipo',
+          );
+        }
       }
     }
 
@@ -175,6 +187,7 @@ export class JugadoresService {
     updateJugadorDto: UpdateJugadorDto,
     userId: number,
     userRole: string,
+    userLigaId?: number,
   ): Promise<Jugador> {
     const jugador = await this.findOne(id);
 
@@ -200,11 +213,22 @@ export class JugadoresService {
           throw new NotFoundException('Equipo no encontrado');
         }
 
-        // Solo master o dirigente del equipo destino pueden asignar jugadores
-        if (userRole !== 'master' && equipo.dirigenteId !== userId) {
-          throw new ForbiddenException(
-            'No tienes permisos para asignar jugadores a este equipo',
-          );
+        // Validar permisos según rol
+        if (userRole !== 'master') {
+          // Directivo de liga puede editar jugadores de equipos de su liga
+          if (userRole === 'directivo_liga') {
+            if (!userLigaId || equipo.ligaId !== userLigaId) {
+              throw new ForbiddenException(
+                'No tienes permisos para asignar jugadores a equipos de otras ligas',
+              );
+            }
+          }
+          // Dirigente de equipo solo puede editar jugadores de su equipo
+          else if (equipo.dirigenteId !== userId) {
+            throw new ForbiddenException(
+              'No tienes permisos para asignar jugadores a este equipo',
+            );
+          }
         }
       }
     }
