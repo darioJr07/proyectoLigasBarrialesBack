@@ -139,20 +139,31 @@ export class InscripcionesService {
       inscripcionRechazada.categoriaId = createInscripcionDto.categoriaId;
       inscripcionRechazada.estado = usuario.role === 'directivo_liga' ? 'confirmada' : 'pendiente';
       inscripcionRechazada.observaciones = createInscripcionDto.observaciones || '';
-      inscripcionRechazada.fechaInscripcion = createInscripcionDto.fechaInscripcion 
-        ? new Date(createInscripcionDto.fechaInscripcion) 
-        : new Date();
+      
+      // Parsear fecha sin problemas de timezone
+      if (createInscripcionDto.fechaInscripcion) {
+        const [year, month, day] = createInscripcionDto.fechaInscripcion.split('-');
+        inscripcionRechazada.fechaInscripcion = new Date(Number(year), Number(month) - 1, Number(day), 12, 0, 0);
+      } else {
+        inscripcionRechazada.fechaInscripcion = new Date();
+      }
       
       return await this.inscripcionesRepository.save(inscripcionRechazada);
     }
 
     // Si no existe inscripción rechazada, crear una nueva
+    let fechaParsed: Date;
+    if (createInscripcionDto.fechaInscripcion) {
+      const [year, month, day] = createInscripcionDto.fechaInscripcion.split('-');
+      fechaParsed = new Date(Number(year), Number(month) - 1, Number(day), 12, 0, 0);
+    } else {
+      fechaParsed = new Date();
+    }
+
     const inscripcion = this.inscripcionesRepository.create({
       ...createInscripcionDto,
       estado: usuario.role === 'directivo_liga' ? 'confirmada' : 'pendiente',
-      fechaInscripcion: createInscripcionDto.fechaInscripcion 
-        ? new Date(createInscripcionDto.fechaInscripcion) 
-        : new Date(),
+      fechaInscripcion: fechaParsed,
     });
 
     return await this.inscripcionesRepository.save(inscripcion);
@@ -269,6 +280,7 @@ export class InscripcionesService {
   async findOne(id: number, usuario: any): Promise<Inscripcion> {
     const inscripcion = await this.inscripcionesRepository.findOne({
       where: { id },
+      relations: ['campeonato', 'categoria', 'equipo'],
     });
 
     if (!inscripcion) {
@@ -297,6 +309,45 @@ export class InscripcionesService {
   ): Promise<Inscripcion> {
     const inscripcion = await this.findOne(id, usuario);
 
+    // Validar permisos según rol
+    if (usuario.role === 'directivo_liga') {
+      if (usuario.ligaId !== inscripcion.campeonato.ligaId) {
+        throw new ForbiddenException(
+          'No tienes permisos para modificar esta inscripción',
+        );
+      }
+    }
+
+    // Validar que no se cambien IDs críticos (campeonato y equipo no deben cambiar)
+    if (updateInscripcionDto.campeonatoId && updateInscripcionDto.campeonatoId !== inscripcion.campeonatoId) {
+      throw new BadRequestException(
+        'No se puede cambiar el campeonato de una inscripción existente',
+      );
+    }
+
+    if (updateInscripcionDto.equipoId && updateInscripcionDto.equipoId !== inscripcion.equipoId) {
+      throw new BadRequestException(
+        'No se puede cambiar el equipo de una inscripción existente',
+      );
+    }
+
+    // Si se quiere cambiar la categoría, validar que pertenezca al mismo campeonato
+    if (updateInscripcionDto.categoriaId && updateInscripcionDto.categoriaId !== inscripcion.categoriaId) {
+      const nuevaCategoria = await this.categoriasRepository.findOne({
+        where: { id: updateInscripcionDto.categoriaId },
+      });
+
+      if (!nuevaCategoria) {
+        throw new NotFoundException('Categoría no encontrada');
+      }
+
+      if (nuevaCategoria.campeonatoId !== inscripcion.campeonatoId) {
+        throw new BadRequestException(
+          'La nueva categoría debe pertenecer al mismo campeonato',
+        );
+      }
+    }
+
     // Validar permisos para cambiar estado
     if (updateInscripcionDto.estado) {
       if (usuario.role === 'directivo_liga') {
@@ -305,15 +356,45 @@ export class InscripcionesService {
             'No tienes permisos para cambiar el estado de esta inscripción',
           );
         }
-      } else {
+      } else if (usuario.role !== 'master') {
         throw new ForbiddenException(
-          'Solo directivos pueden cambiar el estado de inscripciones',
+          'Solo directivos y master pueden cambiar el estado de inscripciones',
         );
       }
     }
 
-    Object.assign(inscripcion, updateInscripcionDto);
-    return await this.inscripcionesRepository.save(inscripcion);
+    // Preparar objeto con campos a actualizar
+    const updateData: any = {};
+
+    if (updateInscripcionDto.categoriaId !== undefined) {
+      updateData.categoriaId = updateInscripcionDto.categoriaId;
+    }
+    if (updateInscripcionDto.observaciones !== undefined) {
+      updateData.observaciones = updateInscripcionDto.observaciones;
+    }
+    if (updateInscripcionDto.estado !== undefined) {
+      updateData.estado = updateInscripcionDto.estado;
+    }
+    if (updateInscripcionDto.fechaInscripcion !== undefined) {
+      // Parsear fecha sin problemas de timezone
+      const [year, month, day] = updateInscripcionDto.fechaInscripcion.split('-');
+      updateData.fechaInscripcion = new Date(Number(year), Number(month) - 1, Number(day), 12, 0, 0);
+    }
+
+    // Usar update() en lugar de save() para evitar conflictos con relaciones eager
+    await this.inscripcionesRepository.update(id, updateData);
+
+    // Retornar la inscripción actualizada
+    const inscripcionActualizada = await this.inscripcionesRepository.findOne({
+      where: { id },
+      relations: ['campeonato', 'categoria', 'equipo'],
+    });
+
+    if (!inscripcionActualizada) {
+      throw new NotFoundException(`Inscripción con ID ${id} no encontrada después de actualizar`);
+    }
+
+    return inscripcionActualizada;
   }
 
   /**
