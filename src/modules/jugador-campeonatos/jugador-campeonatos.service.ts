@@ -385,7 +385,28 @@ export class JugadorCampeonatosService {
 
   async update(id: number, dto: UpdateJugadorCampeonatoDto, usuario: any): Promise<JugadorCampeonato> {
     console.log('🔧 UPDATE recibido - ID:', id, 'DTO:', dto);
-    const jugadorCampeonato = await this.findOne(id, usuario);
+    
+    // Primero validar que existe y el usuario tiene permisos
+    const jugadorCampeonato = await this.jugadorCampeonatoRepo.findOne({
+      where: { id },
+      relations: ['campeonato'],
+    });
+
+    if (!jugadorCampeonato) {
+      throw new NotFoundException('Inscripción no encontrada');
+    }
+
+    // Validar permisos de acceso
+    if (usuario.role === 'dirigente_equipo') {
+      if (jugadorCampeonato.equipoId !== usuario.equipoId) {
+        throw new ForbiddenException('No tienes permisos para editar esta inscripción');
+      }
+    } else if (usuario.role === 'directivo_liga') {
+      if (jugadorCampeonato.campeonato.ligaId !== usuario.ligaId) {
+        throw new ForbiddenException('No tienes permisos para editar esta inscripción');
+      }
+    }
+
     console.log('📦 Habilitación actual:', {
       id: jugadorCampeonato.id,
       categoriaId: jugadorCampeonato.categoriaId,
@@ -412,9 +433,8 @@ export class JugadorCampeonatosService {
       }
     }
 
-    // Solo permitir actualizar categoriaId, numeroCancha, posicion y observaciones
+    // Validar categoría si se está actualizando
     if (dto.categoriaId !== undefined) {
-      // Validar que la categoría existe y pertenece al campeonato
       const categoria = await this.categoriaRepo.findOne({
         where: { id: dto.categoriaId, campeonatoId: jugadorCampeonato.campeonatoId, activo: true },
       });
@@ -422,28 +442,29 @@ export class JugadorCampeonatosService {
       if (!categoria) {
         throw new BadRequestException('Categoría no válida para este campeonato');
       }
-
-      jugadorCampeonato.categoriaId = dto.categoriaId;
-    }
-    if (dto.numeroCancha !== undefined) {
-      jugadorCampeonato.numeroCancha = dto.numeroCancha;
-    }
-    if (dto.posicion !== undefined) {
-      jugadorCampeonato.posicion = dto.posicion;
-    }
-    if (dto.observaciones !== undefined) {
-      jugadorCampeonato.observaciones = dto.observaciones;
     }
 
-    console.log('💾 Habilitación después de actualizar:', {
-      id: jugadorCampeonato.id,
-      categoriaId: jugadorCampeonato.categoriaId,
-      numeroCancha: jugadorCampeonato.numeroCancha,
-      posicion: jugadorCampeonato.posicion,
-      observaciones: jugadorCampeonato.observaciones
+    // Construir el objeto de actualización solo con los campos que vienen en el DTO
+    const updateData: any = {};
+    if (dto.categoriaId !== undefined) updateData.categoriaId = dto.categoriaId;
+    if (dto.numeroCancha !== undefined) updateData.numeroCancha = dto.numeroCancha;
+    if (dto.posicion !== undefined) updateData.posicion = dto.posicion;
+    if (dto.observaciones !== undefined) updateData.observaciones = dto.observaciones;
+
+    console.log('💾 Datos a actualizar:', updateData);
+
+    // Usar update directo que es más confiable para campos simples
+    await this.jugadorCampeonatoRepo.update(id, updateData);
+
+    // Cargar y retornar el registro actualizado
+    const resultado = await this.jugadorCampeonatoRepo.findOne({
+      where: { id },
     });
 
-    const resultado = await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
+    if (!resultado) {
+      throw new NotFoundException('Error al cargar el registro actualizado');
+    }
+
     console.log('✅ Resultado guardado:', {
       id: resultado.id,
       categoriaId: resultado.categoriaId,
@@ -451,6 +472,7 @@ export class JugadorCampeonatosService {
       posicion: resultado.posicion,
       observaciones: resultado.observaciones
     });
+    
     return resultado;
   }
 
