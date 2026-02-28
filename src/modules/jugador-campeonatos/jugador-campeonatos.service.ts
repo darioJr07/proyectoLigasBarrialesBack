@@ -384,7 +384,15 @@ export class JugadorCampeonatosService {
   }
 
   async update(id: number, dto: UpdateJugadorCampeonatoDto, usuario: any): Promise<JugadorCampeonato> {
+    console.log('🔧 UPDATE recibido - ID:', id, 'DTO:', dto);
     const jugadorCampeonato = await this.findOne(id, usuario);
+    console.log('📦 Habilitación actual:', {
+      id: jugadorCampeonato.id,
+      categoriaId: jugadorCampeonato.categoriaId,
+      numeroCancha: jugadorCampeonato.numeroCancha,
+      posicion: jugadorCampeonato.posicion,
+      observaciones: jugadorCampeonato.observaciones
+    });
 
     // Validar número de camiseta duplicado si se está actualizando
     if (dto.numeroCancha !== undefined && dto.numeroCancha !== jugadorCampeonato.numeroCancha) {
@@ -427,7 +435,23 @@ export class JugadorCampeonatosService {
       jugadorCampeonato.observaciones = dto.observaciones;
     }
 
-    return await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
+    console.log('💾 Habilitación después de actualizar:', {
+      id: jugadorCampeonato.id,
+      categoriaId: jugadorCampeonato.categoriaId,
+      numeroCancha: jugadorCampeonato.numeroCancha,
+      posicion: jugadorCampeonato.posicion,
+      observaciones: jugadorCampeonato.observaciones
+    });
+
+    const resultado = await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
+    console.log('✅ Resultado guardado:', {
+      id: resultado.id,
+      categoriaId: resultado.categoriaId,
+      numeroCancha: resultado.numeroCancha,
+      posicion: resultado.posicion,
+      observaciones: resultado.observaciones
+    });
+    return resultado;
   }
 
   async aprobar(id: number, dto: AprobarHabilitacionDto, usuario: any): Promise<JugadorCampeonato> {
