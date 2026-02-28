@@ -17,4 +17,9 @@ export class UpdateJugadorCampeonatoDto extends PartialType(CreateJugadorCampeon
   @IsOptional()
   @MaxLength(50)
   posicion?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  observaciones?: string;
 }

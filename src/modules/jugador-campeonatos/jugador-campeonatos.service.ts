@@ -404,7 +404,7 @@ export class JugadorCampeonatosService {
       }
     }
 
-    // Solo permitir actualizar categoriaId, numeroCancha y posicion
+    // Solo permitir actualizar categoriaId, numeroCancha, posicion y observaciones
     if (dto.categoriaId !== undefined) {
       // Validar que la categoría existe y pertenece al campeonato
       const categoria = await this.categoriaRepo.findOne({
@@ -422,6 +422,9 @@ export class JugadorCampeonatosService {
     }
     if (dto.posicion !== undefined) {
       jugadorCampeonato.posicion = dto.posicion;
+    }
+    if (dto.observaciones !== undefined) {
+      jugadorCampeonato.observaciones = dto.observaciones;
     }
 
     return await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
