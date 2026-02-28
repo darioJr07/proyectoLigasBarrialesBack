@@ -404,7 +404,19 @@ export class JugadorCampeonatosService {
       }
     }
 
-    // Solo permitir actualizar numeroCancha y posicion
+    // Solo permitir actualizar categoriaId, numeroCancha y posicion
+    if (dto.categoriaId !== undefined) {
+      // Validar que la categoría existe y pertenece al campeonato
+      const categoria = await this.categoriaRepo.findOne({
+        where: { id: dto.categoriaId, campeonatoId: jugadorCampeonato.campeonatoId, activo: true },
+      });
+
+      if (!categoria) {
+        throw new BadRequestException('Categoría no válida para este campeonato');
+      }
+
+      jugadorCampeonato.categoriaId = dto.categoriaId;
+    }
     if (dto.numeroCancha !== undefined) {
       jugadorCampeonato.numeroCancha = dto.numeroCancha;
     }

@@ -5,6 +5,10 @@ import { IsNumber, IsString, IsOptional, Min, Max, MaxLength } from 'class-valid
 export class UpdateJugadorCampeonatoDto extends PartialType(CreateJugadorCampeonatoDto) {
   @IsNumber()
   @IsOptional()
+  categoriaId?: number;
+
+  @IsNumber()
+  @IsOptional()
   @Min(1)
   @Max(99)
   numeroCancha?: number;
