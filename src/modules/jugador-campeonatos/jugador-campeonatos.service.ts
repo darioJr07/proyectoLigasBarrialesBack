@@ -384,8 +384,6 @@ export class JugadorCampeonatosService {
   }
 
   async update(id: number, dto: UpdateJugadorCampeonatoDto, usuario: any): Promise<JugadorCampeonato> {
-    console.log('🔧 UPDATE recibido - ID:', id, 'DTO:', dto);
-    
     // Primero validar que existe y el usuario tiene permisos
     const jugadorCampeonato = await this.jugadorCampeonatoRepo.findOne({
       where: { id },
@@ -406,14 +404,6 @@ export class JugadorCampeonatosService {
         throw new ForbiddenException('No tienes permisos para editar esta inscripción');
       }
     }
-
-    console.log('📦 Habilitación actual:', {
-      id: jugadorCampeonato.id,
-      categoriaId: jugadorCampeonato.categoriaId,
-      numeroCancha: jugadorCampeonato.numeroCancha,
-      posicion: jugadorCampeonato.posicion,
-      observaciones: jugadorCampeonato.observaciones
-    });
 
     // Validar número de camiseta duplicado si se está actualizando
     if (dto.numeroCancha !== undefined && dto.numeroCancha !== jugadorCampeonato.numeroCancha) {
@@ -451,8 +441,6 @@ export class JugadorCampeonatosService {
     if (dto.posicion !== undefined) updateData.posicion = dto.posicion;
     if (dto.observaciones !== undefined) updateData.observaciones = dto.observaciones;
 
-    console.log('💾 Datos a actualizar:', updateData);
-
     // Usar update directo que es más confiable para campos simples
     await this.jugadorCampeonatoRepo.update(id, updateData);
 
@@ -464,14 +452,6 @@ export class JugadorCampeonatosService {
     if (!resultado) {
       throw new NotFoundException('Error al cargar el registro actualizado');
     }
-
-    console.log('✅ Resultado guardado:', {
-      id: resultado.id,
-      categoriaId: resultado.categoriaId,
-      numeroCancha: resultado.numeroCancha,
-      posicion: resultado.posicion,
-      observaciones: resultado.observaciones
-    });
     
     return resultado;
   }
