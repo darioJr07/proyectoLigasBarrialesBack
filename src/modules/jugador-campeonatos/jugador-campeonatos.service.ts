@@ -28,6 +28,8 @@ export class JugadorCampeonatosService {
     private categoriaRepo: Repository<Categoria>,
     @InjectRepository(Inscripcion)
     private inscripcionRepo: Repository<Inscripcion>,
+    @InjectRepository(Transferencia)
+    private transferenciaRepo: Repository<Transferencia>,
   ) {}
 
   async create(dto: CreateJugadorCampeonatoDto, usuario: any): Promise<JugadorCampeonato> {
@@ -111,6 +113,40 @@ export class JugadorCampeonatosService {
     } else if (usuario.role === 'directivo_liga') {
       if (!usuario.ligaId || equipo.ligaId !== usuario.ligaId) {
         throw new ForbiddenException('Solo puedes inscribir jugadores de tu liga');
+      }
+    }
+
+    // 8.1. Verificar si hay transferencias activas del jugador desde este equipo
+    const transferenciaPendiente = await this.transferenciaRepo.findOne({
+      where: {
+        jugadorId: dto.jugadorId,
+        campeonatoId: dto.campeonatoId,
+        equipoOrigenId: dto.equipoId,
+        activo: true,
+      },
+      relations: ['equipoDestino'],
+    });
+
+    // Bloquear habilitación si hay una transferencia en proceso
+    if (transferenciaPendiente) {
+      // Caso 1: El equipo origen aún no ha decidido
+      if (transferenciaPendiente.estadoEquipoOrigen === 'pendiente') {
+        throw new BadRequestException(
+          `Existe una solicitud de transferencia pendiente para este jugador hacia el equipo ` +
+          `"${transferenciaPendiente.equipoDestino?.nombre || 'destino'}". ` +
+          `Debe aprobar o rechazar la transferencia antes de poder habilitar al jugador en este campeonato.`
+        );
+      }
+      
+      // Caso 2: El equipo origen aprobó, pero el directivo aún no ha decidido
+      if (transferenciaPendiente.estadoEquipoOrigen === 'aprobado' && 
+          transferenciaPendiente.estadoDirectivo === 'pendiente') {
+        throw new BadRequestException(
+          `La transferencia de este jugador hacia el equipo ` +
+          `"${transferenciaPendiente.equipoDestino?.nombre || 'destino'}" fue aprobada por usted ` +
+          `y está pendiente de aprobación del directivo. No puede habilitar al jugador mientras ` +
+          `la transferencia esté en proceso.`
+        );
       }
     }
 

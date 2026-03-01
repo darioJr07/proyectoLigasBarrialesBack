@@ -9,6 +9,7 @@ import { Equipo } from '../equipos/entities/equipo.entity';
 import { Categoria } from '../categorias/entities/categoria.entity';
 import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
 import { Usuario } from '../auth/entities/usuario.entity';
+import { Transferencia } from '../transferencias/entities/transferencia.entity';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { Usuario } from '../auth/entities/usuario.entity';
       Categoria,
       Inscripcion,
       Usuario,
+      Transferencia,
     ]),
   ],
   controllers: [JugadorCampeonatosController],
