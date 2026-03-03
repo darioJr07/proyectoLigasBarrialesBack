@@ -204,6 +204,17 @@ export class EquiposService {
     }
 
     Object.assign(equipo, updateEquipoDto);
+    // Forzar relaciones eager para que TypeORM use los FK actualizados al guardar
+    if (updateEquipoDto.ligaId !== undefined) {
+      equipo.liga = updateEquipoDto.ligaId
+        ? ({ id: updateEquipoDto.ligaId } as any)
+        : (null as any);
+    }
+    if (updateEquipoDto.dirigenteId !== undefined) {
+      equipo.dirigente = updateEquipoDto.dirigenteId
+        ? ({ id: updateEquipoDto.dirigenteId } as any)
+        : (null as any);
+    }
     return this.equipoRepository.save(equipo);
   }
 

@@ -235,6 +235,12 @@ export class LigasService {
     }
 
     Object.assign(liga, updateLigaDto);
+    // Forzar la relación eager para que TypeORM use el FK actualizado al guardar
+    if (updateLigaDto.directivoId !== undefined) {
+      liga.directivo = updateLigaDto.directivoId
+        ? ({ id: updateLigaDto.directivoId } as any)
+        : (null as any);
+    }
     return await this.ligaRepository.save(liga);
   }
 

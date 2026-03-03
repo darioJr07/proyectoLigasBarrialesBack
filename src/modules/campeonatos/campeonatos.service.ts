@@ -199,6 +199,12 @@ export class CampeonatosService {
     }
 
     Object.assign(campeonato, updateCampeonatoDto);
+    // Forzar la relación eager para que TypeORM use el FK actualizado al guardar
+    if (updateCampeonatoDto.ligaId !== undefined) {
+      campeonato.liga = updateCampeonatoDto.ligaId
+        ? ({ id: updateCampeonatoDto.ligaId } as any)
+        : (null as any);
+    }
     return await this.campeonatosRepository.save(campeonato);
   }
 
