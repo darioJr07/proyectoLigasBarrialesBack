@@ -14,6 +14,8 @@ import { CategoriasModule } from './modules/categorias/categorias.module';
 import { InscripcionesModule } from './modules/inscripciones/inscripciones.module';
 import { JugadorCampeonatosModule } from './modules/jugador-campeonatos/jugador-campeonatos.module';
 import { TransferenciasModule } from './modules/transferencias/transferencias.module';
+import { ConfiguracionModule } from './modules/configuracion/configuracion.module';
+import { ConfiguracionSistema } from './modules/configuracion/entities/configuracion-sistema.entity';
 import { Rol } from './modules/auth/entities/rol.entity';
 import { Usuario } from './modules/auth/entities/usuario.entity';
 
@@ -35,7 +37,7 @@ import { Usuario } from './modules/auth/entities/usuario.entity';
     }),
 
     // Importar entities necesarias para el seed
-    TypeOrmModule.forFeature([Rol, Usuario]),
+    TypeOrmModule.forFeature([Rol, Usuario, ConfiguracionSistema]),
 
     // Módulos de la aplicación
     AuthModule,
@@ -48,6 +50,7 @@ import { Usuario } from './modules/auth/entities/usuario.entity';
     InscripcionesModule,
     JugadorCampeonatosModule,
     TransferenciasModule,
+    ConfiguracionModule,
   ],
   controllers: [HealthController],
   providers: [DatabaseSeedService],

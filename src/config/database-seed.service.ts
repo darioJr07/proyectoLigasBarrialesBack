@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Rol } from '../modules/auth/entities/rol.entity';
 import { Usuario } from '../modules/auth/entities/usuario.entity';
+import { ConfiguracionSistema } from '../modules/configuracion/entities/configuracion-sistema.entity';
 import * as bcrypt from 'bcrypt';
 
 /**
@@ -19,12 +20,15 @@ export class DatabaseSeedService implements OnModuleInit {
     private rolRepository: Repository<Rol>,
     @InjectRepository(Usuario)
     private usuarioRepository: Repository<Usuario>,
+    @InjectRepository(ConfiguracionSistema)
+    private configuracionRepository: Repository<ConfiguracionSistema>,
   ) {}
 
   async onModuleInit() {
     this.logger.log('🌱 Iniciando seed de base de datos...');
     await this.seedRoles();
     await this.seedAdminUser();
+    await this.seedConfiguracion();
     this.logger.log('✅ Seed de base de datos completado');
   }
 
@@ -102,5 +106,43 @@ export class DatabaseSeedService implements OnModuleInit {
     this.logger.log(`  📧 Email: ${adminEmail}`);
     this.logger.log(`  🔑 Contraseña: ${password}`);
     this.logger.warn('  ⚠️  IMPORTANTE: Cambiar la contraseña después del primer inicio de sesión');
+  }
+
+  /**
+   * Crea las configuraciones globales por defecto si no existen
+   * Por defecto todos los módulos están habilitados (valor: 'true')
+   */
+  private async seedConfiguracion(): Promise<void> {
+    const configs = [
+      {
+        clave: 'modulo_jugadores',
+        valor: 'true',
+        descripcion: 'Permite a los dirigentes de equipo acceder al módulo de Jugadores (registrar y editar jugadores)',
+      },
+      {
+        clave: 'modulo_inscripciones',
+        valor: 'true',
+        descripcion: 'Permite a los dirigentes de equipo acceder al módulo de Inscripciones/Habilitaciones',
+      },
+      {
+        clave: 'modulo_transferencias',
+        valor: 'true',
+        descripcion: 'Permite a los dirigentes de equipo acceder al módulo de Transferencias',
+      },
+    ];
+
+    for (const configData of configs) {
+      const existe = await this.configuracionRepository.findOne({
+        where: { clave: configData.clave },
+      });
+
+      if (!existe) {
+        const config = this.configuracionRepository.create(configData);
+        await this.configuracionRepository.save(config);
+        this.logger.log(`✓ Configuración creada: ${configData.clave} = ${configData.valor}`);
+      } else {
+        this.logger.log(`• Configuración ya existe: ${configData.clave} = ${existe.valor}`);
+      }
+    }
   }
 }
