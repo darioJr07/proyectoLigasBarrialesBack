@@ -22,23 +22,18 @@ export class CloudinaryStorageService implements IStorageService {
    */
   async uploadImage(file: Express.Multer.File, folder: string): Promise<string> {
     try {
-      // Subir el archivo a Cloudinary
-      const result: UploadApiResponse = await cloudinary.uploader.upload(
-        file.path,
-        {
-          folder: `ligas-barriales/${folder}`, // Prefijo para organizar todas las imágenes del proyecto
-          resource_type: 'image',
-          use_filename: true,
-          unique_filename: true,
-        },
-      );
+      const result: UploadApiResponse = await cloudinary.uploader.upload(file.path, {
+        folder: `ligas-barriales/${folder}`,
+        resource_type: 'image',
+        use_filename: true,
+        unique_filename: true,
+      });
 
       // Eliminar el archivo temporal del servidor
       if (fs.existsSync(file.path)) {
         fs.unlinkSync(file.path);
       }
 
-      // Retornar la URL segura (https)
       return result.secure_url;
     } catch (error) {
       // Eliminar archivo temporal en caso de error

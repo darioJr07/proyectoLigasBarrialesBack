@@ -11,6 +11,7 @@ import { CreateJugadorDto } from './dto/create-jugador.dto';
 import { UpdateJugadorDto } from './dto/update-jugador.dto';
 import { Equipo } from '../equipos/entities/equipo.entity';
 import { Usuario } from '../auth/entities/usuario.entity';
+import { UploadService } from '../upload/upload.service';
 
 /**
  * Servicio para gestión de jugadores
@@ -23,7 +24,29 @@ export class JugadoresService {
     private readonly jugadorRepository: Repository<Jugador>,
     @InjectRepository(Equipo)
     private readonly equipoRepository: Repository<Equipo>,
+    private readonly uploadService: UploadService,
   ) {}
+
+  /**
+   * Verifica si una URL corresponde a una imagen de Cloudinary
+   */
+  private isCloudinaryUrl(url: string): boolean {
+    return typeof url === 'string' && url.includes('res.cloudinary.com');
+  }
+
+  /**
+   * Elimina una imagen de Cloudinary de forma no bloqueante
+   * Si falla, solo registra el error sin interrumpir la operación principal
+   */
+  private async deleteOldImageSafely(url: string): Promise<void> {
+    if (url && this.isCloudinaryUrl(url)) {
+      try {
+        await this.uploadService.deleteImage(url);
+      } catch (error) {
+        console.error(`No se pudo eliminar imagen antigua de Cloudinary: ${error.message}`);
+      }
+    }
+  }
 
   /**
    * Crear un nuevo jugador
@@ -231,6 +254,24 @@ export class JugadoresService {
           }
         }
       }
+    }
+
+    // Eliminar imagen anterior de Cloudinary si se está reemplazando
+    if (
+      updateJugadorDto.imagen !== undefined &&
+      updateJugadorDto.imagen !== jugador.imagen &&
+      jugador.imagen
+    ) {
+      await this.deleteOldImageSafely(jugador.imagen);
+    }
+
+    // Eliminar imagen de cédula anterior de Cloudinary si se está reemplazando
+    if (
+      updateJugadorDto.imagenCedula !== undefined &&
+      updateJugadorDto.imagenCedula !== jugador.imagenCedula &&
+      jugador.imagenCedula
+    ) {
+      await this.deleteOldImageSafely(jugador.imagenCedula);
     }
 
     Object.assign(jugador, updateJugadorDto);

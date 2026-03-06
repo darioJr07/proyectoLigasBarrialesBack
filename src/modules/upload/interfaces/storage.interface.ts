@@ -7,6 +7,7 @@ export interface IStorageService {
    * Sube una imagen al servicio de almacenamiento
    * @param file Archivo subido por multer
    * @param folder Carpeta virtual donde se almacenará (ej: "liga-1/equipos")
+   * @param numerodocumento Número de documento del jugador (opcional) para dar nombre significativo al archivo
    * @returns URL pública de la imagen
    */
   uploadImage(file: Express.Multer.File, folder: string): Promise<string>;

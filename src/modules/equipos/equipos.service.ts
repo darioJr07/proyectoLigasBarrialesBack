@@ -11,6 +11,7 @@ import { CreateEquipoDto } from './dto/create-equipo.dto';
 import { UpdateEquipoDto } from './dto/update-equipo.dto';
 import { Usuario } from '../auth/entities/usuario.entity';
 import { Liga } from '../ligas/entities/liga.entity';
+import { UploadService } from '../upload/upload.service';
 
 /**
  * Servicio para gestión de equipos
@@ -25,7 +26,22 @@ export class EquiposService {
     private readonly usuarioRepository: Repository<Usuario>,
     @InjectRepository(Liga)
     private readonly ligaRepository: Repository<Liga>,
+    private readonly uploadService: UploadService,
   ) {}
+
+  private isCloudinaryUrl(url: string): boolean {
+    return typeof url === 'string' && url.includes('res.cloudinary.com');
+  }
+
+  private async deleteOldImageSafely(url: string): Promise<void> {
+    if (url && this.isCloudinaryUrl(url)) {
+      try {
+        await this.uploadService.deleteImage(url);
+      } catch (error) {
+        console.error(`No se pudo eliminar imagen antigua de Cloudinary: ${error.message}`);
+      }
+    }
+  }
 
   /**
    * Crear un nuevo equipo
@@ -201,6 +217,15 @@ export class EquiposService {
       await this.usuarioRepository.update(updateEquipoDto.dirigenteId, {
         equipoId: id,
       });
+    }
+
+    // Eliminar imagen anterior de Cloudinary si se está reemplazando
+    if (
+      updateEquipoDto.imagen !== undefined &&
+      updateEquipoDto.imagen !== equipo.imagen &&
+      equipo.imagen
+    ) {
+      await this.deleteOldImageSafely(equipo.imagen);
     }
 
     Object.assign(equipo, updateEquipoDto);

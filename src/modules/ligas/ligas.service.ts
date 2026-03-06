@@ -10,6 +10,7 @@ import { Liga } from './entities/liga.entity';
 import { CreateLigaDto } from './dto/create-liga.dto';
 import { UpdateLigaDto } from './dto/update-liga.dto';
 import { Usuario } from '../auth/entities/usuario.entity';
+import { UploadService } from '../upload/upload.service';
 
 /**
  * Servicio de Ligas
@@ -25,7 +26,22 @@ export class LigasService {
     private readonly ligaRepository: Repository<Liga>,
     @InjectRepository(Usuario)
     private readonly usuarioRepository: Repository<Usuario>,
+    private readonly uploadService: UploadService,
   ) {}
+
+  private isCloudinaryUrl(url: string): boolean {
+    return typeof url === 'string' && url.includes('res.cloudinary.com');
+  }
+
+  private async deleteOldImageSafely(url: string): Promise<void> {
+    if (url && this.isCloudinaryUrl(url)) {
+      try {
+        await this.uploadService.deleteImage(url);
+      } catch (error) {
+        console.error(`No se pudo eliminar imagen antigua de Cloudinary: ${error.message}`);
+      }
+    }
+  }
 
   /**
    * Crea una nueva liga
@@ -232,6 +248,15 @@ export class LigasService {
           `Ya existe una liga con el nombre "${updateLigaDto.nombre}"`,
         );
       }
+    }
+
+    // Eliminar imagen anterior de Cloudinary si se está reemplazando
+    if (
+      updateLigaDto.imagen !== undefined &&
+      updateLigaDto.imagen !== liga.imagen &&
+      liga.imagen
+    ) {
+      await this.deleteOldImageSafely(liga.imagen);
     }
 
     Object.assign(liga, updateLigaDto);
