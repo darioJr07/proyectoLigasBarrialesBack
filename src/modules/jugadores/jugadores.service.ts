@@ -49,6 +49,29 @@ export class JugadoresService {
   }
 
   /**
+   * Valida que una cédula ecuatoriana sea válida mediante el algoritmo oficial
+   */
+  private validateCedulaEcuatoriana(cedula: string): boolean {
+    if (!/^\d{10}$/.test(cedula)) return false;
+
+    const provincia = parseInt(cedula.substring(0, 2));
+    if (provincia < 1 || provincia > 24) return false;
+
+    const tercerDigito = parseInt(cedula[2]);
+    if (tercerDigito >= 6) return false;
+
+    const coeficientes = [2, 1, 2, 1, 2, 1, 2, 1, 2];
+    let suma = 0;
+    for (let i = 0; i < 9; i++) {
+      let valor = parseInt(cedula[i]) * coeficientes[i];
+      if (valor >= 10) valor -= 9;
+      suma += valor;
+    }
+    const digitoVerificador = suma % 10 === 0 ? 0 : 10 - (suma % 10);
+    return digitoVerificador === parseInt(cedula[9]);
+  }
+
+  /**
    * Crear un nuevo jugador
    */
   async create(
@@ -67,6 +90,13 @@ export class JugadoresService {
 
       if (jugadorExistente) {
         throw new BadRequestException('Ya existe un jugador con esta cédula');
+      }
+    }
+
+    // Validar algoritmo de cédula ecuatoriana
+    if (createJugadorDto.tipoDocumento === 'Cédula' && cedula) {
+      if (!this.validateCedulaEcuatoriana(cedula)) {
+        throw new BadRequestException('La cédula ingresada no es válida según el registro civil ecuatoriano');
       }
     }
 
@@ -222,6 +252,16 @@ export class JugadoresService {
 
       if (jugadorExistente) {
         throw new BadRequestException('Ya existe un jugador con esta cédula');
+      }
+    }
+
+    // Validar algoritmo de cédula ecuatoriana si se actualiza la cédula
+    if (updateJugadorDto.cedula) {
+      const tipoDocumentoEfectivo = updateJugadorDto.tipoDocumento ?? jugador.tipoDocumento;
+      if (tipoDocumentoEfectivo === 'Cédula') {
+        if (!this.validateCedulaEcuatoriana(updateJugadorDto.cedula)) {
+          throw new BadRequestException('La cédula ingresada no es válida según el registro civil ecuatoriano');
+        }
       }
     }
 
