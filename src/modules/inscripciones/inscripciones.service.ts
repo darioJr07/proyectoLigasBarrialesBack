@@ -12,6 +12,7 @@ import { UpdateInscripcionDto } from './dto/update-inscripcion.dto';
 import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { Categoria } from '../categorias/entities/categoria.entity';
 import { Equipo } from '../equipos/entities/equipo.entity';
+import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
 
 @Injectable()
 export class InscripcionesService {
@@ -24,6 +25,8 @@ export class InscripcionesService {
     private categoriasRepository: Repository<Categoria>,
     @InjectRepository(Equipo)
     private equiposRepository: Repository<Equipo>,
+    @InjectRepository(JugadorCampeonato)
+    private jugadorCampeonatoRepository: Repository<JugadorCampeonato>,
   ) {}
 
   /**
@@ -178,6 +181,7 @@ export class InscripcionesService {
       .leftJoinAndSelect('inscripcion.campeonato', 'campeonato')
       .leftJoinAndSelect('inscripcion.categoria', 'categoria')
       .leftJoinAndSelect('inscripcion.equipo', 'equipo')
+      .leftJoinAndSelect('equipo.liga', 'equipoLiga')
       .leftJoinAndSelect('campeonato.liga', 'liga')
       .where('inscripcion.activo = :activo', { activo: true });
 
@@ -475,5 +479,138 @@ export class InscripcionesService {
     inscripcion.estado = 'rechazada';
     inscripcion.observaciones = observaciones;
     return await this.inscripcionesRepository.save(inscripcion);
+  }
+
+  /**
+   * Registra un movimiento de categoría (ascenso o descenso) a media temporada.
+   *
+   * Flujo:
+   * 1. Busca la inscripción 'confirmada' actual del equipo en el campeonato.
+   * 2. La marca como 'transferida', guardando el motivo y la categoría de origen.
+   * 3. Crea una nueva inscripción 'confirmada' en la categoría destino.
+   *
+   * Esto permite que el equipo aparezca solo en la nueva categoría en los
+   * fixtures generados (que filtran por estado = 'confirmada'), mientras el
+   * historial queda intacto en la inscripción 'transferida'.
+   */
+  async registrarMovimientoCategoria(
+    dto: {
+      campeonatoId: number;
+      equipoId: number;
+      categoriaNuevaId: number;
+      motivo: 'ascenso' | 'descenso';
+      observaciones?: string;
+    },
+    usuario: any,
+  ): Promise<Inscripcion> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException(
+        'Solo master o directivo_liga pueden registrar movimientos de categoría.',
+      );
+    }
+
+    // 1. Buscar inscripción confirmada actual del equipo en ese campeonato
+    const inscripcionActual = await this.inscripcionesRepository.findOne({
+      where: {
+        campeonatoId: dto.campeonatoId,
+        equipoId: dto.equipoId,
+        estado: 'confirmada',
+        activo: true,
+      },
+    });
+
+    if (!inscripcionActual) {
+      throw new NotFoundException(
+        'El equipo no tiene una inscripción confirmada en este campeonato.',
+      );
+    }
+
+    // 2. Verificar que la categoría destino existe y pertenece al campeonato
+    const categoriaDestino = await this.categoriasRepository.findOne({
+      where: { id: dto.categoriaNuevaId, campeonatoId: dto.campeonatoId },
+    });
+
+    if (!categoriaDestino) {
+      throw new NotFoundException(
+        'La categoría destino no existe o no pertenece a este campeonato.',
+      );
+    }
+
+    // 3. Verificar que no sea la misma categoría
+    if (inscripcionActual.categoriaId === dto.categoriaNuevaId) {
+      throw new BadRequestException(
+        'El equipo ya está en esa categoría.',
+      );
+    }
+
+    // 4. Marcar inscripción actual como 'transferida'
+    inscripcionActual.estado = 'transferida';
+    inscripcionActual.motivo = dto.motivo;
+    inscripcionActual.categoriaOrigenId = inscripcionActual.categoriaId;
+    if (dto.observaciones) {
+      inscripcionActual.observaciones = dto.observaciones;
+    }
+    await this.inscripcionesRepository.save(inscripcionActual);
+
+    // 5. Crear nueva inscripción confirmada en la categoría destino
+    const nuevaInscripcion = this.inscripcionesRepository.create({
+      campeonatoId: dto.campeonatoId,
+      equipoId: dto.equipoId,
+      categoriaId: dto.categoriaNuevaId,
+      estado: 'confirmada',
+      fechaInscripcion: new Date(),
+      observaciones: dto.observaciones ?? `Movimiento por ${dto.motivo}`,
+      motivo: null,
+      categoriaOrigenId: null,
+      activo: true,
+    });
+
+    const inscripcionGuardada = await this.inscripcionesRepository.save(nuevaInscripcion);
+
+    // 6. Actualizar la categoría de las fichas de calificación de los jugadores del equipo
+    await this.jugadorCampeonatoRepository.update(
+      { equipoId: dto.equipoId, campeonatoId: dto.campeonatoId, activo: true },
+      { categoriaId: dto.categoriaNuevaId },
+    );
+
+    return inscripcionGuardada;
+  }
+
+  /**
+   * Obtener el historial completo de participaciones de un equipo.
+   * Incluye todas las inscripciones (confirmadas, transferidas, rechazadas, etc.)
+   * ordenadas de más reciente a más antigua.
+   *
+   * Permisos:
+   * - master: puede ver el historial de cualquier equipo.
+   * - directivo_liga: solo equipos de su liga.
+   * - dirigente_equipo: solo su propio equipo.
+   */
+  async findByEquipo(equipoId: number, usuario: any): Promise<Inscripcion[]> {
+    // Validar permisos de acceso
+    if (usuario.role === 'dirigente_equipo' && usuario.equipoId !== equipoId) {
+      throw new ForbiddenException(
+        'Solo puedes ver el historial de tu propio equipo.',
+      );
+    }
+
+    const inscripciones = await this.inscripcionesRepository
+      .createQueryBuilder('inscripcion')
+      .leftJoinAndSelect('inscripcion.campeonato', 'campeonato')
+      .leftJoinAndSelect('campeonato.liga', 'liga')
+      .leftJoinAndSelect('inscripcion.categoria', 'categoria')
+      .leftJoinAndSelect('inscripcion.equipo', 'equipo')
+      .where('inscripcion.equipoId = :equipoId', { equipoId })
+      .orderBy('inscripcion.fechaInscripcion', 'DESC')
+      .getMany();
+
+    // Si es directivo_liga, filtrar solo equipos de su liga
+    if (usuario.role === 'directivo_liga') {
+      return inscripciones.filter(
+        (i) => i.campeonato?.liga?.id === usuario.ligaId,
+      );
+    }
+
+    return inscripciones;
   }
 }

@@ -70,19 +70,6 @@ export class TransferenciasService {
       throw new BadRequestException('El jugador no tiene equipo asignado');
     }
 
-    // FLUJO B: El jugador NO debe estar habilitado
-    const jugadorCampeonato = await this.jugadorCampeonatoRepo.findOne({
-      where: {
-        jugadorId: dto.jugadorId,
-        campeonatoId: dto.campeonatoId,
-        activo: true,
-      },
-    });
-
-    if (jugadorCampeonato) {
-      throw new BadRequestException('El jugador ya está habilitado en este campeonato. No puede ser transferido.');
-    }
-
     // 3. Obtener equipo origen
     const equipoOrigenId = jugador.equipoId;
     const equipoOrigen = await this.equipoRepo.findOne({
@@ -157,28 +144,6 @@ export class TransferenciasService {
 
     if (transferenciaActiva) {
       throw new BadRequestException('Ya existe una transferencia activa para este jugador en este campeonato. Debe esperar a que se complete o rechace.');
-    }
-
-    // 10. Validar que el jugador no vuelva al mismo equipo del cual fue transferido
-    const transferenciaAnterior = await this.transferenciaRepo.findOne({
-      where: {
-        jugadorId: dto.jugadorId,
-        campeonatoId: dto.campeonatoId,
-        equipoOrigenId: dto.equipoDestinoId,
-        estadoEquipoOrigen: 'aprobado',
-        estadoDirectivo: 'aprobado',
-        activo: true,
-      },
-    });
-
-    console.log('Verificación regreso:', {
-      jugadorId: dto.jugadorId,
-      equipoDestinoId: dto.equipoDestinoId,
-      existeTransferenciaDesde: transferenciaAnterior ? 'SÍ' : 'NO',
-    });
-
-    if (transferenciaAnterior) {
-      throw new BadRequestException('El jugador no puede regresar a un equipo del cual ya fue transferido en este campeonato');
     }
 
     // 11. Crear la transferencia
@@ -392,16 +357,25 @@ export class TransferenciasService {
     console.log(`Equipo Origen ID: ${transferencia.equipoOrigenId}`);
     console.log(`Equipo Destino ID: ${transferencia.equipoDestinoId}`);
     
-    // FLUJO B: Solo actualizar equipoId en tabla jugadores
-    // NO crear habilitación (eso lo hará el equipo destino después)
-    
-    // Usar UPDATE directo para evitar conflictos con relaciones eager
+    // 1. Actualizar equipoId en tabla jugadores
     const updateResult = await this.jugadorRepo
       .createQueryBuilder()
       .update()
       .set({ equipoId: transferencia.equipoDestinoId })
       .where('id = :jugadorId', { jugadorId: transferencia.jugadorId })
       .execute();
+
+    // 2. Desactivar la ficha de habilitación del jugador en el equipo origen (si existe)
+    await this.jugadorCampeonatoRepo.update(
+      {
+        jugadorId: transferencia.jugadorId,
+        campeonatoId: transferencia.campeonatoId,
+        equipoId: transferencia.equipoOrigenId,
+        activo: true,
+      },
+      { activo: false },
+    );
+    console.log(`✓ Ficha de habilitación del equipo origen desactivada (si existía)`);
 
     console.log(`✓ UPDATE ejecutado`);
     console.log(`  - Filas afectadas: ${updateResult.affected}`);

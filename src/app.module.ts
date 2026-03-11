@@ -15,6 +15,8 @@ import { InscripcionesModule } from './modules/inscripciones/inscripciones.modul
 import { JugadorCampeonatosModule } from './modules/jugador-campeonatos/jugador-campeonatos.module';
 import { TransferenciasModule } from './modules/transferencias/transferencias.module';
 import { ConfiguracionModule } from './modules/configuracion/configuracion.module';
+import { PartidosModule } from './modules/partidos/partidos.module';
+import { TablaPosicionesModule } from './modules/tabla-posiciones/tabla-posiciones.module';
 import { ConfiguracionSistema } from './modules/configuracion/entities/configuracion-sistema.entity';
 import { Rol } from './modules/auth/entities/rol.entity';
 import { Usuario } from './modules/auth/entities/usuario.entity';
@@ -51,6 +53,8 @@ import { Usuario } from './modules/auth/entities/usuario.entity';
     JugadorCampeonatosModule,
     TransferenciasModule,
     ConfiguracionModule,
+    PartidosModule,
+    TablaPosicionesModule,
   ],
   controllers: [HealthController],
   providers: [DatabaseSeedService],

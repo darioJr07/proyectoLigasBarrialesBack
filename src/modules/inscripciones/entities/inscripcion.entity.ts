@@ -17,7 +17,7 @@ import { Equipo } from '../../equipos/entities/equipo.entity';
  * Un equipo solo puede inscribirse una vez por campeonato
  */
 @Entity('inscripciones')
-@Index('idx_campeonato_equipo', ['campeonatoId', 'equipoId'], { unique: true })
+@Index('idx_campeonato_equipo', ['campeonatoId', 'equipoId'])
 export class Inscripcion {
   @PrimaryGeneratedColumn()
   id: number;
@@ -57,7 +57,24 @@ export class Inscripcion {
     length: 30,
     default: 'pendiente',
   })
-  estado: 'pendiente' | 'confirmada' | 'rechazada';
+  estado: 'pendiente' | 'confirmada' | 'rechazada' | 'transferida';
+
+  /**
+   * Motivo del movimiento de categoría (solo aplica cuando estado = 'transferida').
+   * Valores posibles: 'ascenso', 'descenso', null.
+   */
+  @Column({
+    type: 'varchar',
+    length: 20,
+    nullable: true,
+  })
+  motivo: 'ascenso' | 'descenso' | null;
+
+  /**
+   * Categoría de origen antes del movimiento (solo aplica cuando estado = 'transferida').
+   */
+  @Column({ name: 'categoria_origen_id', type: 'int', nullable: true })
+  categoriaOrigenId: number | null;
 
   @Column({ type: 'text', nullable: true })
   observaciones: string;

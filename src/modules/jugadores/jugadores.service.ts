@@ -10,6 +10,7 @@ import { Jugador } from './entities/jugador.entity';
 import { CreateJugadorDto } from './dto/create-jugador.dto';
 import { UpdateJugadorDto } from './dto/update-jugador.dto';
 import { Equipo } from '../equipos/entities/equipo.entity';
+import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
 import { Usuario } from '../auth/entities/usuario.entity';
 import { UploadService } from '../upload/upload.service';
 
@@ -24,6 +25,8 @@ export class JugadoresService {
     private readonly jugadorRepository: Repository<Jugador>,
     @InjectRepository(Equipo)
     private readonly equipoRepository: Repository<Equipo>,
+    @InjectRepository(JugadorCampeonato)
+    private readonly jugadorCampeonatoRepository: Repository<JugadorCampeonato>,
     private readonly uploadService: UploadService,
   ) {}
 
@@ -326,15 +329,32 @@ export class JugadoresService {
 
   /**
    * Deshabilitar un jugador (soft delete)
+   * - master: puede desactivar cualquier jugador
+   * - directivo_liga: solo jugadores de equipos de su liga, y solo si no tienen habilitación activa ('habilitado')
    */
-  async remove(id: number, userRole: string): Promise<{ message: string }> {
+  async remove(id: number, userRole: string, userLigaId?: number): Promise<{ message: string }> {
     const jugador = await this.findOne(id);
 
-    // Solo master puede deshabilitar jugadores
     if (userRole !== 'master') {
-      throw new ForbiddenException(
-        'No tienes permisos para deshabilitar jugadores',
-      );
+      if (userRole !== 'directivo_liga') {
+        throw new ForbiddenException('No tienes permisos para deshabilitar jugadores');
+      }
+
+      // Verificar que el jugador pertenece a un equipo de la liga del directivo
+      if (!userLigaId || !jugador.equipo || jugador.equipo.ligaId !== userLigaId) {
+        throw new ForbiddenException('Solo puedes deshabilitar jugadores de equipos de tu propia liga');
+      }
+
+      // Verificar que no tenga habilitaciones activas (estado 'habilitado')
+      const habilitacionActiva = await this.jugadorCampeonatoRepository.findOne({
+        where: { jugadorId: id, estado: 'habilitado', activo: true },
+      });
+
+      if (habilitacionActiva) {
+        throw new ForbiddenException(
+          'No se puede deshabilitar un jugador que tiene una habilitación activa aprobada. Rechaza primero la habilitación.',
+        );
+      }
     }
 
     jugador.activo = false;

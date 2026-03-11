@@ -158,13 +158,13 @@ export class JugadorCampeonatosService {
       },
     });
 
-    // Si existe una habilitación activa, no permitir duplicado
-    if (inscripcionExistente && inscripcionExistente.activo) {
+    // Si existe una habilitación activa del MISMO equipo, no permitir duplicado
+    if (inscripcionExistente && inscripcionExistente.activo && inscripcionExistente.equipoId === dto.equipoId) {
       throw new BadRequestException('Este jugador ya tiene una habilitación activa en el campeonato.');
     }
 
-    // Si existe una habilitación inactiva/rechazada, reutilizarla actualizando sus datos
-    if (inscripcionExistente && !inscripcionExistente.activo) {
+    // Si existe una habilitación inactiva/rechazada del MISMO equipo, reutilizarla
+    if (inscripcionExistente && !inscripcionExistente.activo && inscripcionExistente.equipoId === dto.equipoId) {
       // Validar límite de jugadores habilitados antes de reactivar
       const maxJugadores = campeonato.maxJugadoresHabilitados || 20;
       const habilitadosCount = await this.jugadorCampeonatoRepo.count({
@@ -201,19 +201,36 @@ export class JugadorCampeonatosService {
         }
       }
 
-      inscripcionExistente.equipoId = dto.equipoId;
-      inscripcionExistente.categoriaId = dto.categoriaId;
-      inscripcionExistente.numeroCancha = dto.numeroCancha;
-      inscripcionExistente.posicion = dto.posicion;
-      inscripcionExistente.estado = 'pendiente';
-      inscripcionExistente.activo = true;
-      inscripcionExistente.solicitadoPor = usuario.userId;
-      inscripcionExistente.aprobadoPor = null;
-      inscripcionExistente.fechaAprobacion = null;
-      inscripcionExistente.observaciones = null;
-      inscripcionExistente.fechaInscripcion = new Date();
-      
-      return await this.jugadorCampeonatoRepo.save(inscripcionExistente);
+      // Reactivar la ficha existente del mismo equipo
+      await this.jugadorCampeonatoRepo.update(
+        { id: inscripcionExistente.id },
+        {
+          categoriaId: dto.categoriaId,
+          numeroCancha: dto.numeroCancha,
+          posicion: dto.posicion,
+          estado: 'pendiente',
+          activo: true,
+          solicitadoPor: usuario.userId,
+          aprobadoPor: null,
+          fechaAprobacion: null,
+          observaciones: null,
+          fechaInscripcion: new Date(),
+        }
+      );
+      return await this.jugadorCampeonatoRepo.findOne({ where: { id: inscripcionExistente.id } }) as JugadorCampeonato;
+    }
+
+    // Si existe una habilitación de OTRO equipo (jugador transferido), dejarla como historial
+    // y continuar para crear un nuevo registro abajo (no retorna aquí)
+    if (inscripcionExistente && inscripcionExistente.equipoId !== dto.equipoId) {
+      // Asegurarse de que la ficha del equipo anterior quede inactiva (historial)
+      if (inscripcionExistente.activo) {
+        await this.jugadorCampeonatoRepo.update(
+          { id: inscripcionExistente.id },
+          { activo: false },
+        );
+      }
+      // Continúa al bloque de creación de nuevo registro
     }
 
     // 10. Validar límite de jugadores habilitados para nueva inscripción
@@ -335,48 +352,37 @@ export class JugadorCampeonatosService {
    * Estos jugadores solo tienen equipoId en tabla jugadores, pero sin habilitación
    */
   async findDisponiblesParaTransferencia(campeonatoId: number, usuario: any): Promise<any[]> {
-    // 1. Obtener todos los jugadores que NO tienen habilitación en este campeonato
-    const jugadoresConHabilitacion = await this.jugadorCampeonatoRepo.find({
-      where: { campeonatoId, activo: true },
-      select: ['jugadorId'],
-    });
-
-    const idsConHabilitacion = new Set(jugadoresConHabilitacion.map(h => h.jugadorId));
-
-    // 2. Buscar jugadores sin habilitación
+    // 1. Obtener todos los jugadores activos con equipo asignado (habilitados o no)
     const todosJugadores = await this.jugadorRepo.find({
       where: { activo: true },
       relations: ['equipo'],
     });
 
-    let jugadoresSinHabilitar = todosJugadores.filter(j => 
-      j.equipoId && !idsConHabilitacion.has(j.id)
-    );
+    let jugadoresDisponibles = todosJugadores.filter(j => j.equipoId);
 
-    // 3. Filtrar según rol
+    // 2. Filtrar según rol
     if (usuario.role === 'dirigente_equipo' && usuario.equipoId) {
-      // Excluir jugadores de mi propio equipo
-      jugadoresSinHabilitar = jugadoresSinHabilitar.filter(
+      // Excluir jugadores de mi propio equipo (los que quiero recibir, no los míos)
+      jugadoresDisponibles = jugadoresDisponibles.filter(
         j => j.equipoId !== usuario.equipoId
       );
-
       // Filtrar solo equipos de mi liga
-      jugadoresSinHabilitar = jugadoresSinHabilitar.filter(
+      jugadoresDisponibles = jugadoresDisponibles.filter(
         j => j.equipo && j.equipo.ligaId === usuario.ligaId
       );
     }
 
     if (usuario.role === 'directivo_liga' && usuario.ligaId) {
-      jugadoresSinHabilitar = jugadoresSinHabilitar.filter(
+      jugadoresDisponibles = jugadoresDisponibles.filter(
         j => j.equipo && j.equipo.ligaId === usuario.ligaId
       );
     }
 
-    console.log(`Jugadores SIN HABILITAR disponibles para transferencia: ${jugadoresSinHabilitar.length}`);
+    console.log(`Jugadores disponibles para transferencia (habilitados + no habilitados): ${jugadoresDisponibles.length}`);
 
     // Mapear a formato similar a JugadorCampeonato para el frontend
-    return jugadoresSinHabilitar.map(j => ({
-      id: null, // No hay habilitación
+    return jugadoresDisponibles.map(j => ({
+      id: null,
       jugadorId: j.id,
       jugador: j,
       equipoId: j.equipoId,

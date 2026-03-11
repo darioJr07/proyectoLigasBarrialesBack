@@ -130,7 +130,20 @@ export class LigasService {
     // Directivo de liga solo ve su liga
     if (rolNombre === 'directivo_liga') {
       if (!usuario.ligaId) {
-        // Si no tiene liga asignada, retorna array vacío
+        return [];
+      }
+
+      const liga = await this.ligaRepository.findOne({
+        where: { id: usuario.ligaId },
+        relations: ['directivo'],
+      });
+
+      return liga ? [liga] : [];
+    }
+
+    // Dirigente de equipo ve la liga de su equipo
+    if (rolNombre === 'dirigente_equipo') {
+      if (!usuario.ligaId) {
         return [];
       }
 

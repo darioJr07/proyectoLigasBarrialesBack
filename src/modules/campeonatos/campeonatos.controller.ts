@@ -6,6 +6,7 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
   UseGuards,
   Request,
   ParseIntPipe,
@@ -74,6 +75,36 @@ export class CampeonatosController {
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
     return this.campeonatosService.remove(id, req.user);
+  }
+
+  /**
+   * GET /campeonatos/:id/preview-ascensos-descensos?etapa=primera_etapa
+   * Previsualiza qué equipos ascenderían/descenderían según la tabla final.
+   * No modifica nada en la BD.
+   */
+  @Get(':id/preview-ascensos-descensos')
+  @Roles('master', 'directivo_liga')
+  previewAscensosDescensos(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('etapa') etapa: string,
+    @Request() req: any,
+  ) {
+    return this.campeonatosService.previewAscensosDescensos(id, etapa, req.user);
+  }
+
+  /**
+   * POST /campeonatos/:id/procesar-ascensos-descensos
+   * Ejecuta los movimientos en lote y cierra el campeonato como 'finalizado'.
+   */
+  @Post(':id/procesar-ascensos-descensos')
+  @Roles('master', 'directivo_liga')
+  @HttpCode(HttpStatus.OK)
+  procesarAscensosDescensos(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('etapa') etapa: string,
+    @Request() req: any,
+  ) {
+    return this.campeonatosService.procesarAscensosDescensos(id, etapa, req.user);
   }
 
   @Post('actualizar-estados')

@@ -5,16 +5,36 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Campeonato } from './entities/campeonato.entity';
 import { CreateCampeonatoDto } from './dto/create-campeonato.dto';
 import { UpdateCampeonatoDto } from './dto/update-campeonato.dto';
+import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
+import { Categoria } from '../categorias/entities/categoria.entity';
+import { TablaPosicionesService } from '../tabla-posiciones/tabla-posiciones.service';
+
+export interface MovimientoPreview {
+  equipoId: number;
+  equipoNombre: string;
+  categoriaOrigenId: number;
+  categoriaOrigenNombre: string;
+  categoriaDestinoId: number | null;
+  categoriaDestinoNombre: string;
+  motivo: 'ascenso' | 'descenso';
+  posicion: number;
+  advertencia?: string;
+}
 
 @Injectable()
 export class CampeonatosService {
   constructor(
     @InjectRepository(Campeonato)
     private campeonatosRepository: Repository<Campeonato>,
+    @InjectRepository(Inscripcion)
+    private inscripcionesRepository: Repository<Inscripcion>,
+    @InjectRepository(Categoria)
+    private categoriasRepository: Repository<Categoria>,
+    private tablaPosicionesService: TablaPosicionesService,
   ) {}
 
   /**
@@ -336,5 +356,182 @@ export class CampeonatosService {
     }
 
     return await this.corregirEstadosInicial();
+  }
+
+  /**
+   * Previsualiza los ascensos y descensos que se procesarían al finalizar
+   * la temporada de un campeonato, basándose en la tabla de posiciones de
+   * la etapa indicada.
+   *
+   * No realiza cambios en la BD — solo calcula y devuelve el listado.
+   */
+  async previewAscensosDescensos(
+    campeonatoId: number,
+    etapa: string,
+    usuario: any,
+  ): Promise<MovimientoPreview[]> {
+    const campeonato = await this.campeonatosRepository.findOne({
+      where: { id: campeonatoId },
+    });
+    if (!campeonato) throw new NotFoundException('Campeonato no encontrado');
+
+    if (
+      usuario.role === 'directivo_liga' &&
+      usuario.ligaId !== campeonato.ligaId
+    ) {
+      throw new ForbiddenException('No tienes permisos sobre este campeonato');
+    }
+
+    const categorias = await this.categoriasRepository.find({
+      where: { campeonatoId, activo: true },
+      order: { orden: 'ASC' } as any,
+    });
+
+    const movimientos: MovimientoPreview[] = [];
+
+    for (const categoria of categorias) {
+      const tabla = await this.tablaPosicionesService.calcular(
+        campeonatoId,
+        categoria.id,
+        etapa,
+      );
+      if (tabla.length === 0) continue;
+
+      // ── Descensos: los últimos N de esta categoría → categoría inferior (orden + 1) ──
+      if (categoria.equiposDescienden > 0) {
+        const inferior = categorias.find((c) => c.orden === categoria.orden + 1);
+        const bajando = tabla.slice(
+          Math.max(0, tabla.length - categoria.equiposDescienden),
+        );
+        for (const fila of bajando) {
+          movimientos.push({
+            equipoId: fila.equipoId,
+            equipoNombre: fila.equipoNombre,
+            categoriaOrigenId: categoria.id,
+            categoriaOrigenNombre: categoria.nombre,
+            categoriaDestinoId: inferior?.id ?? null,
+            categoriaDestinoNombre: inferior?.nombre ?? '⚠️ Sin categoría inferior',
+            motivo: 'descenso',
+            posicion: fila.posicion,
+            advertencia: inferior ? undefined : 'No existe categoría inferior configurada',
+          });
+        }
+      }
+
+      // ── Ascensos: los primeros N de esta categoría → categoría superior (orden - 1) ──
+      if (categoria.equiposAscienden > 0) {
+        const superior = categorias.find((c) => c.orden === categoria.orden - 1);
+        const subiendo = tabla.slice(0, categoria.equiposAscienden);
+        for (const fila of subiendo) {
+          movimientos.push({
+            equipoId: fila.equipoId,
+            equipoNombre: fila.equipoNombre,
+            categoriaOrigenId: categoria.id,
+            categoriaOrigenNombre: categoria.nombre,
+            categoriaDestinoId: superior?.id ?? null,
+            categoriaDestinoNombre: superior?.nombre ?? '⚠️ Sin categoría superior',
+            motivo: 'ascenso',
+            posicion: fila.posicion,
+            advertencia: superior ? undefined : 'No existe categoría superior configurada',
+          });
+        }
+      }
+    }
+
+    return movimientos;
+  }
+
+  /**
+   * Procesa en lote los ascensos y descensos al finalizar la temporada.
+   *
+   * Para cada movimiento del preview:
+   * 1. Marca la inscripción 'confirmada' del equipo como 'transferida'.
+   * 2. Crea una nueva inscripción 'confirmada' en la categoría destino.
+   *
+   * Al finalizar cambia el estado del campeonato a 'finalizado'.
+   */
+  async procesarAscensosDescensos(
+    campeonatoId: number,
+    etapa: string,
+    usuario: any,
+  ): Promise<{
+    procesados: number;
+    saltados: number;
+    detalle: MovimientoPreview[];
+  }> {
+    if (usuario.role !== 'master' && usuario.role !== 'directivo_liga') {
+      throw new ForbiddenException(
+        'Solo master o directivo_liga pueden procesar ascensos y descensos',
+      );
+    }
+
+    const movimientos = await this.previewAscensosDescensos(
+      campeonatoId,
+      etapa,
+      usuario,
+    );
+
+    let procesados = 0;
+    let saltados = 0;
+    const procesadosIds = new Set<number>(); // equipoIds ya procesados en esta llamada
+
+    for (const mov of movimientos) {
+      // Omitir si no hay categoría destino válida
+      if (!mov.categoriaDestinoId) {
+        saltados++;
+        continue;
+      }
+
+      // Evitar doble procesamiento del mismo equipo
+      if (procesadosIds.has(mov.equipoId)) {
+        saltados++;
+        continue;
+      }
+
+      // Buscar inscripción confirmada actual
+      const inscripcionActual = await this.inscripcionesRepository.findOne({
+        where: {
+          campeonatoId,
+          equipoId: mov.equipoId,
+          estado: 'confirmada',
+          activo: true,
+        },
+      });
+
+      if (!inscripcionActual) {
+        saltados++;
+        continue;
+      }
+
+      // 1. Marcar como transferida
+      inscripcionActual.estado = 'transferida';
+      inscripcionActual.motivo = mov.motivo;
+      inscripcionActual.categoriaOrigenId = mov.categoriaOrigenId;
+      await this.inscripcionesRepository.save(inscripcionActual);
+
+      // 2. Crear nueva inscripción confirmada en destino
+      const nueva = this.inscripcionesRepository.create({
+        campeonatoId,
+        equipoId: mov.equipoId,
+        categoriaId: mov.categoriaDestinoId,
+        estado: 'confirmada',
+        fechaInscripcion: new Date(),
+        observaciones: `Procesado automáticamente: ${mov.motivo} desde ${mov.categoriaOrigenNombre}`,
+        motivo: null,
+        categoriaOrigenId: null,
+        activo: true,
+      });
+      await this.inscripcionesRepository.save(nueva);
+
+      procesadosIds.add(mov.equipoId);
+      procesados++;
+    }
+
+    // Cambiar campeonato a finalizado
+    await this.campeonatosRepository.update(campeonatoId, {
+      estado: 'finalizado',
+    });
+
+    return { procesados, saltados, detalle: movimientos };
   }
 }

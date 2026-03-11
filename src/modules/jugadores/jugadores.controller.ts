@@ -70,7 +70,7 @@ export class JugadoresController {
 
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req: any) {
-    return this.jugadoresService.remove(+id, req.user.role);
+    return this.jugadoresService.remove(+id, req.user.role, req.user.ligaId);
   }
 
   @Delete(':id/permanente')

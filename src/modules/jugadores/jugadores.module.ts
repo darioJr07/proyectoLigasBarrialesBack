@@ -4,6 +4,7 @@ import { JugadoresService } from './jugadores.service';
 import { JugadoresController } from './jugadores.controller';
 import { Jugador } from './entities/jugador.entity';
 import { Equipo } from '../equipos/entities/equipo.entity';
+import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
 import { UploadModule } from '../upload/upload.module';
 
 /**
@@ -11,7 +12,7 @@ import { UploadModule } from '../upload/upload.module';
  * Organiza todos los componentes relacionados con jugadores
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([Jugador, Equipo]), UploadModule],
+  imports: [TypeOrmModule.forFeature([Jugador, Equipo, JugadorCampeonato]), UploadModule],
   controllers: [JugadoresController],
   providers: [JugadoresService],
   exports: [JugadoresService, TypeOrmModule],

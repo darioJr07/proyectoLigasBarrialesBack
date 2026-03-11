@@ -134,8 +134,12 @@ export class UsuariosService {
       usuario.rol = rol;
     }
 
-    // Actualizar campos
-    Object.assign(usuario, updateUsuarioDto);
+    // Actualizar campos (se excluyen valores null/undefined para no sobreescribir
+    // campos existentes como ligaId cuando no se envían intencionalmente)
+    const cleanDto = Object.fromEntries(
+      Object.entries(updateUsuarioDto).filter(([_, v]) => v !== undefined && v !== null),
+    );
+    Object.assign(usuario, cleanDto);
 
     const updatedUser = await this.usuarioRepository.save(usuario);
 

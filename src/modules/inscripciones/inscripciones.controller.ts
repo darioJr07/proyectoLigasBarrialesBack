@@ -55,6 +55,15 @@ export class InscripcionesController {
     return this.inscripcionesService.findByCategoria(categoriaId, req.user);
   }
 
+  @Get('equipo/:equipoId')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  findByEquipo(
+    @Param('equipoId', ParseIntPipe) equipoId: number,
+    @Request() req: any,
+  ) {
+    return this.inscripcionesService.findByEquipo(equipoId, req.user);
+  }
+
   @Get(':id')
   @Roles('master', 'directivo_liga', 'dirigente_equipo')
   findOne(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
@@ -85,6 +94,27 @@ export class InscripcionesController {
     @Request() req: any,
   ) {
     return this.inscripcionesService.rechazar(id, observaciones, req.user);
+  }
+
+  /**
+   * POST /inscripciones/movimiento-categoria
+   * Registra un ascenso o descenso de categoría a media temporada.
+   * Solo accesible para master y directivo_liga.
+   */
+  @Post('movimiento-categoria')
+  @Roles('master', 'directivo_liga')
+  @HttpCode(HttpStatus.CREATED)
+  registrarMovimientoCategoria(
+    @Body() dto: {
+      campeonatoId: number;
+      equipoId: number;
+      categoriaNuevaId: number;
+      motivo: 'ascenso' | 'descenso';
+      observaciones?: string;
+    },
+    @Request() req: any,
+  ) {
+    return this.inscripcionesService.registrarMovimientoCategoria(dto, req.user);
   }
 
   @Delete(':id')

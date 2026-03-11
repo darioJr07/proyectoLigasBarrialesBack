@@ -3,9 +3,15 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CampeonatosService } from './campeonatos.service';
 import { CampeonatosController } from './campeonatos.controller';
 import { Campeonato } from './entities/campeonato.entity';
+import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
+import { Categoria } from '../categorias/entities/categoria.entity';
+import { TablaPosicionesModule } from '../tabla-posiciones/tabla-posiciones.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Campeonato])],
+  imports: [
+    TypeOrmModule.forFeature([Campeonato, Inscripcion, Categoria]),
+    TablaPosicionesModule,
+  ],
   controllers: [CampeonatosController],
   providers: [CampeonatosService],
   exports: [CampeonatosService, TypeOrmModule],

@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, JoinColumn, CreateDateColumn, Unique } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, JoinColumn, CreateDateColumn } from 'typeorm';
 import { Jugador } from '../../jugadores/entities/jugador.entity';
 import { Campeonato } from '../../campeonatos/entities/campeonato.entity';
 import { Equipo } from '../../equipos/entities/equipo.entity';
@@ -6,7 +6,7 @@ import { Categoria } from '../../categorias/entities/categoria.entity';
 import { Usuario } from '../../auth/entities/usuario.entity';
 
 @Entity('jugador_campeonatos')
-@Unique(['jugadorId', 'campeonatoId']) // Un jugador solo se inscribe una vez por campeonato
+// Nota: se permite más de un registro por jugador/campeonato para historial de transferencias
 export class JugadorCampeonato {
   @PrimaryGeneratedColumn()
   id: number;
