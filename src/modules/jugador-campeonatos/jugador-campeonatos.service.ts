@@ -42,14 +42,19 @@ export class JugadorCampeonatosService {
       throw new NotFoundException('Campeonato no encontrado');
     }
 
-    if (campeonato.estado !== 'inscripcion_abierta') {
+    // Se permite habilitar cuando el campeonato está en inscripcion_abierta o en_curso
+    // (en_curso: se puede hasta la 3ra fecha jugada; el cierre se controla con el switch de configuración)
+    if (campeonato.estado !== 'inscripcion_abierta' && campeonato.estado !== 'en_curso') {
       throw new BadRequestException('El campeonato no está en periodo de inscripción');
     }
 
-    // 2. Validar fecha límite de inscripción
-    const fechaActual = new Date();
-    if (fechaActual > campeonato.fechaLimiteInscripcion) {
-      throw new BadRequestException('La fecha límite de inscripción ha vencido');
+    // 2. Validar fecha límite de inscripción solo cuando el campeonato aún no ha iniciado
+    // Si ya está en_curso, la fecha límite ya pasó y el control lo ejerce el switch de configuración
+    if (campeonato.estado === 'inscripcion_abierta') {
+      const fechaActual = new Date();
+      if (fechaActual > campeonato.fechaLimiteInscripcion) {
+        throw new BadRequestException('La fecha límite de inscripción ha vencido');
+      }
     }
 
     // 3. Verificar que el jugador existe
