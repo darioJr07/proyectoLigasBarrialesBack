@@ -109,6 +109,16 @@ export class JugadorCampeonatosController {
     return this.jugadorCampeonatosService.rechazar(id, dto, req.user);
   }
 
+  @Patch(':id/dar-de-baja')
+  @Roles('master', 'directivo_liga')
+  darDeBaja(
+    @Param('id', ParseIntPipe) id: number,
+    @Body('motivo') motivo: string,
+    @Request() req: any,
+  ) {
+    return this.jugadorCampeonatosService.darDeBaja(id, motivo, req.user);
+  }
+
   @Delete(':id')
   @Roles('master', 'directivo_liga')
   remove(@Param('id', ParseIntPipe) id: number, @Request() req: any) {

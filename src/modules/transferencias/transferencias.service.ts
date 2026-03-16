@@ -146,6 +146,16 @@ export class TransferenciasService {
       throw new BadRequestException('Ya existe una transferencia activa para este jugador en este campeonato. Debe esperar a que se complete o rechace.');
     }
 
+    // 10. Verificar si el jugador ya tiene una habilitación pendiente o aprobada en este campeonato
+    // No bloquea la solicitud (se permiten pases a media temporada), solo genera un aviso informativo
+    const habilitacionActiva = await this.jugadorCampeonatoRepo.findOne({
+      where: [
+        { jugadorId: dto.jugadorId, campeonatoId: dto.campeonatoId, activo: true, estado: 'pendiente' },
+        { jugadorId: dto.jugadorId, campeonatoId: dto.campeonatoId, activo: true, estado: 'habilitado' },
+      ],
+      relations: ['equipo'],
+    });
+
     // 11. Crear la transferencia
     const transferencia = this.transferenciaRepo.create({
       jugadorId: dto.jugadorId,
@@ -165,7 +175,16 @@ export class TransferenciasService {
     if (!loaded) {
       throw new NotFoundException('Error al cargar la transferencia creada');
     }
-    return this.serializeTransferencia(loaded);
+
+    const result = this.serializeTransferencia(loaded);
+
+    // Agregar advertencia informativa si el jugador ya estaba habilitado o pendiente en este campeonato
+    if (habilitacionActiva) {
+      const estadoTexto = habilitacionActiva.estado === 'habilitado' ? 'habilitado' : 'en proceso de habilitación';
+      result.advertencia = `⚠️ Atención: Este jugador ya está ${estadoTexto} en el equipo "${habilitacionActiva.equipo?.nombre || 'otro equipo'}" para este campeonato. Si la transferencia es aprobada por ambas partes, será dado de baja automáticamente en ese equipo.`;
+    }
+
+    return result;
   }
 
   async aprobarPorEquipoOrigen(id: number, dto: AprobarTransferenciaDto, usuario: any): Promise<Transferencia> {

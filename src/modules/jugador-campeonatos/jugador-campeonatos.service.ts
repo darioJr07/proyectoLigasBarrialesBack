@@ -538,6 +538,41 @@ export class JugadorCampeonatosService {
     return await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
   }
 
+  /**
+   * Da de baja a un jugador ya habilitado, liberando el cupo para que el equipo
+   * pueda registrar un nuevo jugador. Solo aplica a habilitaciones en estado 'habilitado'.
+   * El registro queda con activo=false para conservar el historial.
+   */
+  async darDeBaja(id: number, motivo: string, usuario: any): Promise<JugadorCampeonato> {
+    if (usuario.role !== 'master' && usuario.role !== 'directivo_liga') {
+      throw new ForbiddenException('Solo master o directivo_liga pueden dar de baja habilitaciones');
+    }
+
+    const jugadorCampeonato = await this.jugadorCampeonatoRepo.findOne({
+      where: { id, activo: true },
+    });
+
+    if (!jugadorCampeonato) {
+      throw new NotFoundException('Habilitación no encontrada');
+    }
+
+    if (usuario.role === 'directivo_liga') {
+      if (jugadorCampeonato.campeonato.ligaId !== usuario.ligaId) {
+        throw new ForbiddenException('No tienes permisos para dar de baja habilitaciones de otra liga');
+      }
+    }
+
+    if (jugadorCampeonato.estado !== 'habilitado') {
+      throw new BadRequestException('Solo se pueden dar de baja jugadores con estado habilitado');
+    }
+
+    // Desactivar la habilitación conservando el historial
+    jugadorCampeonato.activo = false;
+    jugadorCampeonato.observaciones = motivo || 'Baja solicitada por administración';
+
+    return await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
+  }
+
   async rechazar(id: number, dto: RechazarHabilitacionDto, usuario: any): Promise<JugadorCampeonato> {
     // Solo directivo_liga y master pueden rechazar
     if (usuario.role !== 'master' && usuario.role !== 'directivo_liga') {
