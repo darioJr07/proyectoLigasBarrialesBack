@@ -567,7 +567,9 @@ export class JugadorCampeonatosService {
     }
 
     // Desactivar la habilitación conservando el historial
+    // El estado pasa a 'baja' para diferenciarlo visualmente de un rechazo
     jugadorCampeonato.activo = false;
+    jugadorCampeonato.estado = 'baja';
     jugadorCampeonato.observaciones = motivo || 'Baja solicitada por administración';
 
     return await this.jugadorCampeonatoRepo.save(jugadorCampeonato);

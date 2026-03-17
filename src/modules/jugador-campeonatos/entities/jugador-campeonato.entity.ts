@@ -47,7 +47,7 @@ export class JugadorCampeonato {
 
   @Column({
     type: 'enum',
-    enum: ['pendiente', 'habilitado', 'rechazado'],
+    enum: ['pendiente', 'habilitado', 'rechazado', 'baja'],
     default: 'pendiente',
   })
   estado: string;
