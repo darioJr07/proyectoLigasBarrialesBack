@@ -472,6 +472,21 @@ export class TransferenciasService {
   }
 
   async findPendientesEquipoOrigen(usuario: any): Promise<any[]> {
+    // El master puede ver TODAS las transferencias pendientes de equipo origen
+    // para poder intervenir en casos de bloqueo o conflicto
+    if (usuario.role === 'master') {
+      const transferencias = await this.transferenciaRepo.find({
+        where: {
+          estadoEquipoOrigen: 'pendiente',
+          activo: true,
+        },
+        relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
+        order: { fechaSolicitud: 'ASC' },
+      });
+      return this.serializeTransferencias(transferencias);
+    }
+
+    // El dirigente_equipo solo ve las transferencias pendientes de su propio equipo
     if (usuario.role !== 'dirigente_equipo' || !usuario.equipoId) {
       throw new ForbiddenException('Solo dirigentes pueden ver transferencias pendientes de su equipo');
     }

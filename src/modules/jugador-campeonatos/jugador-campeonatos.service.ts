@@ -228,11 +228,16 @@ export class JugadorCampeonatosService {
     // Si existe una habilitación de OTRO equipo (jugador transferido), dejarla como historial
     // y continuar para crear un nuevo registro abajo (no retorna aquí)
     if (inscripcionExistente && inscripcionExistente.equipoId !== dto.equipoId) {
-      // Asegurarse de que la ficha del equipo anterior quede inactiva (historial)
+      // Asegurarse de que la ficha del equipo anterior quede inactiva con estado 'baja'
+      // para que el historial sea claro y no quede como 'habilitado' inactivo (confuso)
       if (inscripcionExistente.activo) {
         await this.jugadorCampeonatoRepo.update(
           { id: inscripcionExistente.id },
-          { activo: false },
+          {
+            activo: false,
+            estado: 'baja',
+            observaciones: 'Baja por transferencia a otro equipo',
+          },
         );
       }
       // Continúa al bloque de creación de nuevo registro
