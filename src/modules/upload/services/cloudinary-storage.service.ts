@@ -50,14 +50,20 @@ export class CloudinaryStorageService implements IStorageService {
    */
   async deleteImage(url: string): Promise<void> {
     try {
+      // Eliminar query params si los hubiera (ej: ?t=123456)
+      const cleanUrl = url.split('?')[0];
+
       // Extraer el public_id de la URL de Cloudinary
       // Ejemplo: https://res.cloudinary.com/cloud-name/image/upload/v123456/ligas-barriales/liga-1/equipos/imagen.jpg
-      const matches = url.match(/\/ligas-barriales\/(.+)\.[a-z]+$/);
-      
+      // La bandera /i hace que la extensión sea insensible a mayúsculas (.jpg, .JPG, .PNG, etc.)
+      const matches = cleanUrl.match(/\/ligas-barriales\/(.+)\.[a-zA-Z]+$/i);
+
       if (matches && matches[1]) {
         const publicId = `ligas-barriales/${matches[1]}`;
         await cloudinary.uploader.destroy(publicId);
         console.log(`✅ Imagen eliminada de Cloudinary: ${publicId}`);
+      } else {
+        console.warn(`⚠️ No se pudo extraer el public_id para eliminar: ${url}`);
       }
     } catch (error) {
       console.error(`❌ Error al eliminar imagen de Cloudinary: ${error.message}`);
