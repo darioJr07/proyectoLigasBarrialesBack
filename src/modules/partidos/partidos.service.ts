@@ -10,12 +10,16 @@ import { Partido } from './entities/partido.entity';
 import { CreatePartidoDto } from './dto/create-partido.dto';
 import { UpdatePartidoDto } from './dto/update-partido.dto';
 import { RegistrarResultadoDto } from './dto/registrar-resultado.dto';
+import { GolesService } from '../goles/goles.service';
+import { SancionesService } from '../sanciones/sanciones.service';
 
 @Injectable()
 export class PartidosService {
   constructor(
     @InjectRepository(Partido)
     private partidosRepository: Repository<Partido>,
+    private readonly golesService: GolesService,
+    private readonly sancionesService: SancionesService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -118,6 +122,9 @@ export class PartidosService {
 
     // Copiar el array para no modificar el original
     let equipos: (number | null)[] = [...equipoIds];
+    const ordenEquipoMap = new Map<number, number>(
+      equipoIds.map((equipoId, index) => [equipoId, index + 1]),
+    );
 
     /**
      * Si la cantidad de equipos es IMPAR, se agrega un "BYE" (null).
@@ -166,7 +173,9 @@ export class PartidosService {
             campeonatoId: Number(campeonatoId),
             categoriaId: Number(categoriaId),
             equipoLocalId: local,
+            equipoLocalOrden: ordenEquipoMap.get(local) ?? null,
             equipoVisitanteId: visitante,
+            equipoVisitanteOrden: ordenEquipoMap.get(visitante) ?? null,
             etapa,
             jornada,
             estado: 'programado',
@@ -209,7 +218,9 @@ export class PartidosService {
               campeonatoId: Number(campeonatoId),
               categoriaId: Number(categoriaId),
               equipoLocalId: local,
+              equipoLocalOrden: ordenEquipoMap.get(local) ?? null,
               equipoVisitanteId: visitante,
+              equipoVisitanteOrden: ordenEquipoMap.get(visitante) ?? null,
               etapa,
               jornada: jornadaVuelta,
               estado: 'programado',
@@ -427,7 +438,25 @@ export class PartidosService {
     partido.estado = 'jugado';
     if (dto.observaciones) partido.observaciones = dto.observaciones;
 
-    return this.partidosRepository.save(partido);
+    const partidoGuardado = await this.partidosRepository.save(partido);
+
+    // Registrar goles individuales si se enviaron autores
+    // Se hace DESPUÉS de guardar el partido para que golesLocal/golesVisitante
+    // estén disponibles al validar la suma en GolesService
+    if (dto.autoresGoles && dto.autoresGoles.length > 0) {
+      await this.golesService.registrarGoles(partidoGuardado, dto.autoresGoles);
+    }
+
+    // Procesar partidos cumplidos para suspensiones activas de ambos equipos
+    if (partidoGuardado.equipoLocalId && partidoGuardado.equipoVisitanteId) {
+      await this.sancionesService.procesarPartidosCumplidos(
+        partidoGuardado.campeonatoId,
+        partidoGuardado.equipoLocalId,
+        partidoGuardado.equipoVisitanteId,
+      );
+    }
+
+    return partidoGuardado;
   }
 
   // ─────────────────────────────────────────────────────────────────────────

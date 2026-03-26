@@ -66,6 +66,9 @@ export class Partido {
   @Column({ name: 'equipo_local_id', type: 'int' })
   equipoLocalId: number;
 
+  @Column({ name: 'equipo_local_orden', type: 'int', nullable: true })
+  equipoLocalOrden: number | null;
+
   /**
    * Equipo que juega como local.
    */
@@ -75,6 +78,9 @@ export class Partido {
 
   @Column({ name: 'equipo_visitante_id', type: 'int' })
   equipoVisitanteId: number;
+
+  @Column({ name: 'equipo_visitante_orden', type: 'int', nullable: true })
+  equipoVisitanteOrden: number | null;
 
   /**
    * Equipo que juega como visitante.

@@ -1,0 +1,409 @@
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { TipoSancion } from './entities/tipo-sancion.entity';
+import { ReglaSancion } from './entities/regla-sancion.entity';
+import { Sancion } from './entities/sancion.entity';
+import { CreateTipoSancionDto } from './dto/create-tipo-sancion.dto';
+import { UpdateTipoSancionDto } from './dto/update-tipo-sancion.dto';
+import { CreateReglaSancionDto } from './dto/create-regla-sancion.dto';
+import { UpdateReglaSancionDto } from './dto/update-regla-sancion.dto';
+import { CreateSancionDto } from './dto/create-sancion.dto';
+import { UpdateSancionDto } from './dto/update-sancion.dto';
+
+@Injectable()
+export class SancionesService {
+  constructor(
+    @InjectRepository(TipoSancion)
+    private tipoSancionRepo: Repository<TipoSancion>,
+    @InjectRepository(ReglaSancion)
+    private reglaSancionRepo: Repository<ReglaSancion>,
+    @InjectRepository(Sancion)
+    private sancionRepo: Repository<Sancion>,
+  ) {}
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // TIPOS DE SANCIÓN
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Crea un nuevo tipo de sanción en el catálogo de la liga.
+   */
+  async crearTipoSancion(dto: CreateTipoSancionDto, usuario: any): Promise<TipoSancion> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Solo master o directivo_liga pueden crear tipos de sanción.');
+    }
+    const tipo = this.tipoSancionRepo.create({
+      nombre: dto.nombre,
+      descripcion: dto.descripcion,
+      aplicaA: dto.aplicaA ?? 'jugador',
+      ligaId: dto.ligaId ?? undefined,
+      activo: true,
+    });
+    return this.tipoSancionRepo.save(tipo) as Promise<TipoSancion>;
+  }
+
+  /**
+   * Lista tipos de sanción. Devuelve los globales (ligaId=null) más los de la liga indicada.
+   */
+  async listarTiposSancion(ligaId?: number): Promise<TipoSancion[]> {
+    const query = this.tipoSancionRepo
+      .createQueryBuilder('tipo')
+      .where('tipo.activo = :activo', { activo: true })
+      .orderBy('tipo.aplicaA', 'ASC')
+      .addOrderBy('tipo.nombre', 'ASC');
+
+    if (ligaId) {
+      query.andWhere('(tipo.liga_id = :ligaId OR tipo.liga_id IS NULL)', { ligaId });
+    } else {
+      query.andWhere('tipo.liga_id IS NULL');
+    }
+
+    return query.getMany();
+  }
+
+  /**
+   * Actualiza nombre, descripción, aplicaA o estado activo de un tipo de sanción.
+   */
+  async actualizarTipoSancion(id: number, dto: UpdateTipoSancionDto, usuario: any): Promise<TipoSancion> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Sin permisos para editar tipos de sanción.');
+    }
+    const tipo = await this.tipoSancionRepo.findOne({ where: { id } });
+    if (!tipo) throw new NotFoundException(`TipoSancion #${id} no encontrado.`);
+    Object.assign(tipo, dto);
+    return this.tipoSancionRepo.save(tipo);
+  }
+
+  /**
+   * Soft delete de un tipo de sanción.
+   */
+  async desactivarTipoSancion(id: number, usuario: any): Promise<{ message: string }> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Sin permisos para desactivar tipos de sanción.');
+    }
+    const tipo = await this.tipoSancionRepo.findOne({ where: { id } });
+    if (!tipo) throw new NotFoundException(`TipoSancion #${id} no encontrado.`);
+    tipo.activo = false;
+    await this.tipoSancionRepo.save(tipo);
+    return { message: `Tipo de sanción "${tipo.nombre}" desactivado.` };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // REGLAS DE SANCIÓN
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Crea una regla de sanción para una liga (y opcionalmente campeonato específico).
+   */
+  async crearReglaSancion(dto: CreateReglaSancionDto, usuario: any): Promise<ReglaSancion> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Solo master o directivo_liga pueden crear reglas de sanción.');
+    }
+    const regla = this.reglaSancionRepo.create({
+      ligaId: dto.ligaId,
+      campeonatoId: dto.campeonatoId ?? undefined,
+      tipoSancionId: dto.tipoSancionId,
+      descripcion: dto.descripcion ?? undefined,
+      acumulacionActiva: dto.acumulacionActiva ?? false,
+      acumulacionCantidad: dto.acumulacionCantidad ?? undefined,
+      partidosSuspension: dto.partidosSuspension ?? undefined,
+      puntosDescuento: dto.puntosDescuento ?? 0,
+      activo: true,
+    });
+    return this.reglaSancionRepo.save(regla) as Promise<ReglaSancion>;
+  }
+
+  /**
+   * Lista reglas de sanción. Filtra por liga y opcionalmente por campeonato.
+   */
+  async listarReglas(ligaId: number, campeonatoId?: number): Promise<ReglaSancion[]> {
+    const query = this.reglaSancionRepo
+      .createQueryBuilder('regla')
+      .leftJoinAndSelect('regla.tipoSancion', 'tipo')
+      .where('regla.liga_id = :ligaId', { ligaId })
+      .andWhere('regla.activo = :activo', { activo: true });
+
+    if (campeonatoId) {
+      query.andWhere('(regla.campeonato_id = :campeonatoId OR regla.campeonato_id IS NULL)', { campeonatoId });
+    }
+
+    return query.orderBy('tipo.nombre', 'ASC').getMany();
+  }
+
+  /**
+   * Actualiza parámetros de acumulación y suspensión de una regla.
+   */
+  async actualizarReglaSancion(id: number, dto: UpdateReglaSancionDto, usuario: any): Promise<ReglaSancion> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Sin permisos para editar reglas de sanción.');
+    }
+    const regla = await this.reglaSancionRepo.findOne({ where: { id } });
+    if (!regla) throw new NotFoundException(`ReglaSancion #${id} no encontrada.`);
+    Object.assign(regla, dto);
+    return this.reglaSancionRepo.save(regla);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SANCIONES
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Registra una sanción.
+   *
+   * LÓGICA DE ACUMULACIÓN:
+   * Si la sanción es para un jugador y existe una regla con acumulacionActiva=true
+   * para ese tipo de sanción en la liga/campeonato, el servicio:
+   *   1. Cuenta las sanciones del mismo tipo que tiene el jugador en el campeonato.
+   *   2. Si llega al límite (acumulacionCantidad), crea automáticamente
+   *      una suspensión adicional con partidosSuspension de la regla.
+   */
+  async registrarSancion(dto: CreateSancionDto, usuario: any): Promise<Sancion> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Solo master o directivo_liga pueden registrar sanciones.');
+    }
+
+    const sancion = this.sancionRepo.create({
+      tipoSancionId: dto.tipoSancionId,
+      ligaId: dto.ligaId,
+      campeonatoId: dto.campeonatoId,
+      categoriaId: dto.categoriaId ?? undefined,
+      partidoId: dto.partidoId ?? undefined,
+      jugadorId: dto.jugadorId ?? undefined,
+      equipoId: dto.equipoId ?? undefined,
+      reglaSancionId: dto.reglaSancionId ?? undefined,
+      descripcion: dto.descripcion ?? undefined,
+      partidosSuspension: dto.partidosSuspension ?? 0,
+      partidosCumplidos: 0,
+      suspensionActiva: dto.suspensionActiva ?? ((dto.partidosSuspension ?? 0) > 0),
+      fechaSancion: dto.fechaSancion ? new Date(dto.fechaSancion) as any : new Date() as any,
+      activo: true,
+    });
+
+    // Si viene reglaSancionId y no se indicaron partidos manualmente, tomarlos de la regla
+    if (dto.reglaSancionId && !dto.partidosSuspension) {
+      const reglaRef = await this.reglaSancionRepo.findOne({ where: { id: dto.reglaSancionId } });
+      if (reglaRef?.partidosSuspension) {
+        sancion.partidosSuspension = reglaRef.partidosSuspension;
+        sancion.suspensionActiva = reglaRef.partidosSuspension > 0;
+      }
+    }
+
+    const sancionGuardada = await this.sancionRepo.save(sancion) as Sancion;
+
+    // ── Evaluar acumulación automática si aplica ─────────────────────────────
+    if (dto.jugadorId && dto.campeonatoId) {
+      await this.evaluarAcumulacion(sancionGuardada, usuario);
+    }
+
+    return sancionGuardada;
+  }
+
+  /**
+   * Evalúa si la sanción recién registrada activa la acumulación automática.
+   * Si la regla tiene acumulacionActiva=true y el jugador llegó al límite,
+   * crea una suspensión automática adicional.
+   */
+  private async evaluarAcumulacion(sancion: Sancion, usuario: any): Promise<void> {
+    // Buscar regla de acumulación para este tipo en la liga/campeonato
+    const regla = await this.reglaSancionRepo
+      .createQueryBuilder('regla')
+      .where('regla.liga_id = :ligaId', { ligaId: sancion.ligaId })
+      .andWhere('regla.tipo_sancion_id = :tipoId', { tipoId: sancion.tipoSancionId })
+      .andWhere('regla.acumulacion_activa = true')
+      .andWhere('regla.activo = true')
+      .andWhere('(regla.campeonato_id = :campeonatoId OR regla.campeonato_id IS NULL)',
+        { campeonatoId: sancion.campeonatoId })
+      .orderBy('regla.campeonato_id', 'DESC') // prioriza la regla específica del campeonato
+      .getOne();
+
+    if (!regla || !regla.acumulacionCantidad || !regla.partidosSuspension) return;
+
+    // Contar sanciones activas del mismo tipo para este jugador en el campeonato
+    const total = await this.sancionRepo.count({
+      where: {
+        jugadorId: sancion.jugadorId,
+        campeonatoId: sancion.campeonatoId,
+        tipoSancionId: sancion.tipoSancionId,
+        activo: true,
+      },
+    });
+
+    // Si llegó exactamente al múltiplo del límite, crear suspensión automática
+    if (total > 0 && total % regla.acumulacionCantidad === 0) {
+      const suspension = this.sancionRepo.create({
+        tipoSancionId: sancion.tipoSancionId,
+        ligaId: sancion.ligaId,
+        campeonatoId: sancion.campeonatoId,
+        categoriaId: sancion.categoriaId,
+        jugadorId: sancion.jugadorId,
+        equipoId: sancion.equipoId,
+        descripcion: `Suspensión automática por acumulación de ${regla.acumulacionCantidad} sanciones`,
+        partidosSuspension: regla.partidosSuspension,
+        partidosCumplidos: 0,
+        suspensionActiva: true,
+        fechaSancion: sancion.fechaSancion,
+        activo: true,
+      });
+      await this.sancionRepo.save(suspension);
+    }
+  }
+
+  /**
+   * Lista sanciones con filtros opcionales.
+   * El directivo_liga solo ve sanciones de su liga.
+   * El dirigente_equipo solo ve sanciones de su equipo.
+   */
+  async listarSanciones(
+    filtros: {
+      campeonatoId?: number;
+      ligaId?: number;
+      jugadorId?: number;
+      equipoId?: number;
+      tipoSancionId?: number;
+      soloActivas?: boolean;
+    },
+    usuario: any,
+  ): Promise<Sancion[]> {
+    const query = this.sancionRepo
+      .createQueryBuilder('sancion')
+      .leftJoinAndSelect('sancion.tipoSancion', 'tipo')
+      .leftJoinAndSelect('sancion.reglaSancion', 'regla')
+      .leftJoinAndSelect('sancion.jugador', 'jugador')
+      .leftJoinAndSelect('sancion.equipo', 'equipo')
+      .leftJoinAndSelect('sancion.campeonato', 'campeonato')
+      .leftJoinAndSelect('sancion.categoria', 'categoria')
+      .where('sancion.activo = true');
+
+    // Restricción por rol
+    if (usuario.role === 'directivo_liga') {
+      query.andWhere('sancion.liga_id = :ligaId', { ligaId: usuario.ligaId });
+    } else if (usuario.role === 'dirigente_equipo') {
+      query.andWhere('sancion.equipo_id = :equipoId', { equipoId: usuario.equipoId });
+    }
+
+    if (filtros.campeonatoId) {
+      query.andWhere('sancion.campeonato_id = :campeonatoId', { campeonatoId: filtros.campeonatoId });
+    }
+    if (filtros.ligaId && usuario.role === 'master') {
+      query.andWhere('sancion.liga_id = :ligaId', { ligaId: filtros.ligaId });
+    }
+    if (filtros.jugadorId) {
+      query.andWhere('sancion.jugador_id = :jugadorId', { jugadorId: filtros.jugadorId });
+    }
+    if (filtros.equipoId) {
+      query.andWhere('sancion.equipo_id = :equipoId', { equipoId: filtros.equipoId });
+    }
+    if (filtros.tipoSancionId) {
+      query.andWhere('sancion.tipo_sancion_id = :tipoId', { tipoId: filtros.tipoSancionId });
+    }
+    if (filtros.soloActivas) {
+      query.andWhere('sancion.suspension_activa = true');
+    }
+
+    return query
+      .orderBy('sancion.fecha_sancion', 'DESC')
+      .addOrderBy('sancion.creado_en', 'DESC')
+      .getMany();
+  }
+
+  /**
+   * Devuelve las sanciones de suspensión activas de un jugador.
+   * Se usa para mostrar el badge de suspensión al cargar un partido.
+   */
+  async sancionesActivasJugador(jugadorId: number): Promise<Sancion[]> {
+    return this.sancionRepo.find({
+      where: { jugadorId, suspensionActiva: true, activo: true },
+      order: { creadoEn: 'DESC' },
+    });
+  }
+
+  /**
+   * Actualiza descripción, partidos de suspensión o estado de la sanción.
+   */
+  async actualizarSancion(id: number, dto: UpdateSancionDto, usuario: any): Promise<Sancion> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Sin permisos para editar sanciones.');
+    }
+    const sancion = await this.sancionRepo.findOne({ where: { id } });
+    if (!sancion) throw new NotFoundException(`Sancion #${id} no encontrada.`);
+
+    Object.assign(sancion, dto);
+
+    // Si se actualizan partidos cumplidos y ya completó la suspensión, desactivarla
+    if (
+      sancion.partidosCumplidos >= sancion.partidosSuspension &&
+      sancion.partidosSuspension > 0
+    ) {
+      sancion.suspensionActiva = false;
+    }
+
+    return this.sancionRepo.save(sancion);
+  }
+
+  /**
+   * Anula (soft delete) una sanción.
+   */
+  async anularSancion(id: number, usuario: any): Promise<{ message: string }> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Sin permisos para anular sanciones.');
+    }
+    const sancion = await this.sancionRepo.findOne({ where: { id } });
+    if (!sancion) throw new NotFoundException(`Sancion #${id} no encontrada.`);
+    sancion.activo = false;
+    sancion.suspensionActiva = false;
+    await this.sancionRepo.save(sancion);
+    return { message: `Sanción #${id} anulada correctamente.` };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // AUTOMATIZACIÓN DE PARTIDOS CUMPLIDOS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Se llama automáticamente cuando se registra el resultado de un partido.
+   *
+   * LÓGICA:
+   * 1. Busca todas las suspensiones activas (suspensionActiva=true) de los
+   *    dos equipos del partido en ese campeonato.
+   * 2. A cada una le suma +1 a partidosCumplidos (el equipo jugó un partido
+   *    con el jugador impedido de participar).
+   * 3. Si partidosCumplidos alcanza o supera partidosSuspension, desactiva
+   *    la suspensión automáticamente (suspensionActiva = false).
+   *
+   * SEGURIDAD: si no hay suspensiones activas, retorna inmediatamente sin
+   * hacer ninguna operación en la BD. No lanza excepciones para no afectar
+   * el flujo de registro de resultados.
+   */
+  async procesarPartidosCumplidos(
+    campeonatoId: number,
+    equipoLocalId: number,
+    equipoVisitanteId: number,
+  ): Promise<void> {
+    // Buscar suspensiones activas de ambos equipos en este campeonato
+    const suspensiones = await this.sancionRepo.find({
+      where: [
+        { campeonatoId, equipoId: equipoLocalId,     suspensionActiva: true, activo: true },
+        { campeonatoId, equipoId: equipoVisitanteId, suspensionActiva: true, activo: true },
+      ],
+    });
+
+    if (suspensiones.length === 0) return;
+
+    for (const s of suspensiones) {
+      s.partidosCumplidos = (s.partidosCumplidos ?? 0) + 1;
+
+      // Levantar la suspensión si el jugador completó todos los partidos
+      if (s.partidosSuspension > 0 && s.partidosCumplidos >= s.partidosSuspension) {
+        s.suspensionActiva = false;
+      }
+    }
+
+    await this.sancionRepo.save(suspensiones);
+  }
+}

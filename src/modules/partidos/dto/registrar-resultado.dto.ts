@@ -8,7 +8,11 @@ import {
   MaxLength,
   IsNotEmpty,
   IsIn,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+import { CreateGolDto } from '../../goles/dto/create-gol.dto';
 
 /**
  * DTO para registrar el resultado de un partido jugado.
@@ -67,4 +71,15 @@ export class RegistrarResultadoDto {
   @IsIn(['ninguno', 'local', 'visitante'])
   @IsOptional()
   sancionado?: 'ninguno' | 'local' | 'visitante';
+
+  /**
+   * Autores de los goles del partido (opcional).
+   * Si se envían, deben coincidir con el marcador (golesLocal + golesVisitante).
+   * Si no se envían, el marcador se guarda pero sin detalle de goleadores.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreateGolDto)
+  autoresGoles?: CreateGolDto[];
 }
