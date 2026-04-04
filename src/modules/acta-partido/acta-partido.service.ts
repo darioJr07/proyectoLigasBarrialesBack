@@ -73,6 +73,7 @@ export class ActaPartidoService {
           activo: true,
         },
       ],
+      relations: ['jugador'],
       order: { equipoId: 'ASC', numeroCancha: 'ASC' },
     });
 
@@ -137,6 +138,26 @@ export class ActaPartidoService {
       return [];
     }
 
+    // Validar que ningún jugador sancionado venga marcado como jugó/expulsado
+    const jugadorIdsEnPlanilla = dto.jugadores.map((j) => j.jugadorId);
+    const sancionesActivas = await this.sancionRepo.find({
+      where: {
+        jugadorId: In(jugadorIdsEnPlanilla),
+        campeonatoId: partido.campeonatoId,
+        suspensionActiva: true,
+        activo: true,
+      },
+    });
+    const idsSancionados = new Set(sancionesActivas.map((s) => s.jugadorId));
+    const infractores = dto.jugadores.filter(
+      (j) => idsSancionados.has(j.jugadorId) && (j.estado === 'jugo' || j.estado === 'expulsado'),
+    );
+    if (infractores.length > 0) {
+      throw new BadRequestException(
+        `Los siguientes jugadores tienen suspensión activa y no pueden participar: IDs ${infractores.map((j) => j.jugadorId).join(', ')}`,
+      );
+    }
+
     const registros = dto.jugadores.map((j) => {
       const r = new ActaAlineacion();
       r.partidoId = partidoId;
@@ -163,6 +184,7 @@ export class ActaPartidoService {
 
     const registros = await this.actaRepo.find({
       where: { partidoId, activo: true },
+      relations: ['jugador'],
       order: { equipoId: 'ASC', id: 'ASC' },
     });
 
@@ -283,6 +305,7 @@ export class ActaPartidoService {
 
     return this.incidenciaRepo.find({
       where: { campeonatoId, estadoResolucion: 'pendiente', activo: true },
+      relations: ['jugador', 'equipo'],
       order: { partidoId: 'ASC', id: 'ASC' },
     });
   }

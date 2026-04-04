@@ -453,6 +453,7 @@ export class PartidosService {
         partidoGuardado.campeonatoId,
         partidoGuardado.equipoLocalId,
         partidoGuardado.equipoVisitanteId,
+        partidoGuardado.id,
       );
     }
 

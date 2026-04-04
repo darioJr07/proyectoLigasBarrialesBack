@@ -15,6 +15,8 @@ import { CreateReglaSancionDto } from './dto/create-regla-sancion.dto';
 import { UpdateReglaSancionDto } from './dto/update-regla-sancion.dto';
 import { CreateSancionDto } from './dto/create-sancion.dto';
 import { UpdateSancionDto } from './dto/update-sancion.dto';
+import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
+import { ActaAlineacion } from '../acta-partido/entities/acta-alineacion.entity';
 
 @Injectable()
 export class SancionesService {
@@ -25,6 +27,10 @@ export class SancionesService {
     private reglaSancionRepo: Repository<ReglaSancion>,
     @InjectRepository(Sancion)
     private sancionRepo: Repository<Sancion>,
+    @InjectRepository(JugadorCampeonato)
+    private jugadorCampeonatoRepo: Repository<JugadorCampeonato>,
+    @InjectRepository(ActaAlineacion)
+    private actaAlineacionRepo: Repository<ActaAlineacion>,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -168,11 +174,22 @@ export class SancionesService {
       throw new ForbiddenException('Solo master o directivo_liga pueden registrar sanciones.');
     }
 
+    // Resolver categoriaId automáticamente si no viene en el DTO
+    let categoriaId = dto.categoriaId ?? undefined;
+    if (!categoriaId && dto.jugadorId && dto.campeonatoId) {
+      const jc = await this.jugadorCampeonatoRepo.findOne({
+        where: { jugadorId: dto.jugadorId, campeonatoId: dto.campeonatoId, estado: 'habilitado', activo: true },
+        order: { id: 'DESC' },
+      });
+      if (jc) categoriaId = jc.categoriaId;
+    }
+
     const sancion = this.sancionRepo.create({
       tipoSancionId: dto.tipoSancionId,
       ligaId: dto.ligaId,
       campeonatoId: dto.campeonatoId,
-      categoriaId: dto.categoriaId ?? undefined,
+      categoriaId,
+
       partidoId: dto.partidoId ?? undefined,
       jugadorId: dto.jugadorId ?? undefined,
       equipoId: dto.equipoId ?? undefined,
@@ -384,6 +401,7 @@ export class SancionesService {
     campeonatoId: number,
     equipoLocalId: number,
     equipoVisitanteId: number,
+    partidoId: number,
   ): Promise<void> {
     // Buscar suspensiones activas de ambos equipos en este campeonato
     const suspensiones = await this.sancionRepo.find({
@@ -395,7 +413,25 @@ export class SancionesService {
 
     if (suspensiones.length === 0) return;
 
+    // Cargar la planilla del partido para verificar si el jugador realmente jugó
+    const planilla = await this.actaAlineacionRepo.find({ where: { partidoId } });
+    // Mapa: jugadorId → estado en la planilla
+    const estadoEnPlanilla = new Map<number, string>(
+      planilla.map((a) => [a.jugadorId, a.estado]),
+    );
+
+    // Estados que significan que el jugador SÍ jugó (no cumple partido de suspensión)
+    const JUGO = new Set(['jugo', 'expulsado']);
+
     for (const s of suspensiones) {
+      if (!s.jugadorId) continue; // sanciones colectivas no tienen counter individual
+
+      const estadoJugador = estadoEnPlanilla.get(s.jugadorId);
+
+      // Si aparece en la planilla y jugó → NO contar como cumplido
+      if (estadoJugador && JUGO.has(estadoJugador)) continue;
+
+      // Si no aparece en planilla, o aparece como suspendido/ausente/lesionado/no_jugo → contar
       s.partidosCumplidos = (s.partidosCumplidos ?? 0) + 1;
 
       // Levantar la suspensión si el jugador completó todos los partidos
