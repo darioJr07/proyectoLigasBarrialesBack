@@ -305,7 +305,7 @@ export class ActaPartidoService {
 
     return this.incidenciaRepo.find({
       where: { campeonatoId, estadoResolucion: 'pendiente', activo: true },
-      relations: ['jugador', 'equipo'],
+      relations: ['jugador', 'equipo', 'partido', 'partido.equipoLocal', 'partido.equipoVisitante'],
       order: { partidoId: 'ASC', id: 'ASC' },
     });
   }
