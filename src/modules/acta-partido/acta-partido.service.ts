@@ -358,8 +358,10 @@ export class ActaPartidoService {
       if (dto.descripcion) sancion.descripcion = dto.descripcion;
       sancion.partidosSuspension = dto.partidosSuspension ?? 0;
       sancion.partidosCumplidos = 0;
-      sancion.suspensionActiva = (dto.partidosSuspension ?? 0) > 0;
+      sancion.suspensionActiva = (dto.partidosSuspension ?? 0) > 0 || !!(dto.fechaFinSuspension);
       sancion.fechaSancion = dto.fechaSancion ? new Date(dto.fechaSancion) : new Date();
+      if (dto.fechaInicioSuspension) sancion.fechaInicioSuspension = new Date(dto.fechaInicioSuspension) as any;
+      if (dto.fechaFinSuspension)    sancion.fechaFinSuspension    = new Date(dto.fechaFinSuspension) as any;
       sancion.activo = true;
 
       const sancionGuardada = await this.sancionRepo.save(sancion);

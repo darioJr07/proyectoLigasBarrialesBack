@@ -1,4 +1,4 @@
-import { IsOptional, IsBoolean, IsNumber, IsString, MaxLength, Min } from 'class-validator';
+import { IsOptional, IsBoolean, IsNumber, IsString, IsIn, MaxLength, Min } from 'class-validator';
 
 export class UpdateReglaSancionDto {
   /** Literal del reglamento. Ej: "Art. 108 lit. A: Reincidir en falta estando amonestado" */
@@ -25,6 +25,18 @@ export class UpdateReglaSancionDto {
   @IsNumber()
   @Min(0)
   puntosDescuento?: number;
+
+  /** 'partidos' (default) o 'tiempo' */
+  @IsOptional()
+  @IsString()
+  @IsIn(['partidos', 'tiempo'])
+  modoCastigo?: 'partidos' | 'tiempo';
+
+  /** Duración en meses cuando modoCastigo = 'tiempo'. */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  duracionMeses?: number;
 
   @IsOptional()
   @IsBoolean()

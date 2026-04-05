@@ -53,4 +53,14 @@ export class ResolverIncidenciaDto {
   @IsOptional()
   @IsDateString()
   fechaSancion?: string;
+
+  /** Inicio de suspensión por tiempo (modoCastigo = 'tiempo'). */
+  @IsOptional()
+  @IsDateString()
+  fechaInicioSuspension?: string;
+
+  /** Fin de suspensión por tiempo (modoCastigo = 'tiempo'). */
+  @IsOptional()
+  @IsDateString()
+  fechaFinSuspension?: string;
 }

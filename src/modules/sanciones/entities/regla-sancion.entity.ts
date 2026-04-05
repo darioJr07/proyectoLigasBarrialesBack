@@ -99,6 +99,21 @@ export class ReglaSancion {
   @Column({ name: 'puntos_descuento', type: 'int', nullable: true, default: 0 })
   puntosDescuento: number;
 
+  /**
+   * Modo en que se aplica el castigo: por partidos (default) o por tiempo.
+   * 'partidos' → usa partidosSuspension
+   * 'tiempo'   → usa duracionMeses
+   */
+  @Column({ name: 'modo_castigo', type: 'varchar', length: 10, default: 'partidos' })
+  modoCastigo: 'partidos' | 'tiempo';
+
+  /**
+   * Duración en meses cuando modoCastigo = 'tiempo'.
+   * Ejemplo: 6 → suspensión de 6 meses a partir de la fecha de sanción.
+   */
+  @Column({ name: 'duracion_meses', type: 'int', nullable: true })
+  duracionMeses: number | null;
+
   @Column({ type: 'boolean', default: true })
   activo: boolean;
 

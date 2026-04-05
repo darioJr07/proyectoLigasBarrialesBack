@@ -1,4 +1,4 @@
-import { IsNumber, IsNotEmpty, IsOptional, IsBoolean, IsString, MaxLength, Min } from 'class-validator';
+import { IsNumber, IsNotEmpty, IsOptional, IsBoolean, IsString, IsIn, MaxLength, Min } from 'class-validator';
 
 export class CreateReglaSancionDto {
   @IsNumber()
@@ -37,4 +37,16 @@ export class CreateReglaSancionDto {
   @IsNumber()
   @Min(0)
   puntosDescuento?: number;
+
+  /** 'partidos' (default) o 'tiempo' */
+  @IsOptional()
+  @IsString()
+  @IsIn(['partidos', 'tiempo'])
+  modoCastigo?: 'partidos' | 'tiempo';
+
+  /** Duración en meses cuando modoCastigo = 'tiempo'. */
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  duracionMeses?: number;
 }

@@ -170,4 +170,38 @@ export class SancionesController {
   anular(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
     return this.sancionesService.anularSancion(id, req.user);
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ARRASTRE ENTRE CAMPEONATOS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * GET /sanciones/jugador/:jugadorId/arrastradas?ligaId=X&campeonatoId=Y
+   * Devuelve suspensiones activas del jugador en otros campeonatos de la misma liga.
+   */
+  @Get('jugador/:jugadorId/arrastradas')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  suspensionesArrastradas(
+    @Param('jugadorId', ParseIntPipe) jugadorId: number,
+    @Query('ligaId', ParseIntPipe) ligaId: number,
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+  ) {
+    return this.sancionesService.obtenerSuspensionesArrastradas(jugadorId, ligaId, campeonatoId);
+  }
+
+  /**
+   * POST /sanciones/:id/transferir/:campeonatoId
+   * Transfiere la suspensión al nuevo campeonato y cierra la original.
+   */
+  @Post(':id/transferir/:campeonatoId')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  transferir(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Request() req: any,
+  ) {
+    return this.sancionesService.transferirSancion(id, campeonatoId, req.user);
+  }
 }

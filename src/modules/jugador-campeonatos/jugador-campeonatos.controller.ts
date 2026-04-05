@@ -6,6 +6,7 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
   UseGuards,
   Request,
   ParseIntPipe,
@@ -77,6 +78,25 @@ export class JugadorCampeonatosController {
   @Roles('master', 'directivo_liga', 'dirigente_equipo')
   findByJugador(@Param('jugadorId', ParseIntPipe) jugadorId: number) {
     return this.jugadorCampeonatosService.findByJugador(jugadorId);
+  }
+
+  /**
+   * GET /jugador-campeonatos/jugador/:jugadorId/suspensiones-pendientes?campeonatoId=X
+   * Devuelve suspensiones activas del jugador en otros campeonatos de la misma liga.
+   * Solo visible para master y directivo_liga.
+   */
+  @Get('jugador/:jugadorId/suspensiones-pendientes')
+  @Roles('master', 'directivo_liga')
+  suspensionsPendientes(
+    @Param('jugadorId', ParseIntPipe) jugadorId: number,
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Request() req: any,
+  ) {
+    return this.jugadorCampeonatosService.suspensionesArrastradasAlInscribir(
+      jugadorId,
+      campeonatoId,
+      req.user,
+    );
   }
 
   @Patch(':id')

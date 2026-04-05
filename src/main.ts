@@ -1,3 +1,6 @@
+// Fijar zona horaria Ecuador (UTC-5) antes de cualquier operación con fechas
+process.env.TZ = 'America/Guayaquil';
+
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';

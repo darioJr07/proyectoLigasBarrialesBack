@@ -64,4 +64,14 @@ export class CreateSancionDto {
   @IsOptional()
   @IsDateString()
   fechaSancion?: string;
+
+  /** Fecha de inicio de suspensión por tiempo (modoCastigo = 'tiempo'). */
+  @IsOptional()
+  @IsDateString()
+  fechaInicioSuspension?: string;
+
+  /** Fecha de fin de suspensión por tiempo (modoCastigo = 'tiempo'). */
+  @IsOptional()
+  @IsDateString()
+  fechaFinSuspension?: string;
 }

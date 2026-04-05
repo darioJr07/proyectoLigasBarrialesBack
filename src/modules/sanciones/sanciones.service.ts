@@ -16,6 +16,7 @@ import { UpdateReglaSancionDto } from './dto/update-regla-sancion.dto';
 import { CreateSancionDto } from './dto/create-sancion.dto';
 import { UpdateSancionDto } from './dto/update-sancion.dto';
 import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
+import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { ActaAlineacion } from '../acta-partido/entities/acta-alineacion.entity';
 
 @Injectable()
@@ -31,6 +32,8 @@ export class SancionesService {
     private jugadorCampeonatoRepo: Repository<JugadorCampeonato>,
     @InjectRepository(ActaAlineacion)
     private actaAlineacionRepo: Repository<ActaAlineacion>,
+    @InjectRepository(Campeonato)
+    private campeonatoRepo: Repository<Campeonato>,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -120,6 +123,8 @@ export class SancionesService {
       acumulacionCantidad: dto.acumulacionCantidad ?? undefined,
       partidosSuspension: dto.partidosSuspension ?? undefined,
       puntosDescuento: dto.puntosDescuento ?? 0,
+      modoCastigo: dto.modoCastigo ?? 'partidos',
+      duracionMeses: dto.duracionMeses ?? null,
       activo: true,
     });
     return this.reglaSancionRepo.save(regla) as Promise<ReglaSancion>;
@@ -199,15 +204,30 @@ export class SancionesService {
       partidosCumplidos: 0,
       suspensionActiva: dto.suspensionActiva ?? ((dto.partidosSuspension ?? 0) > 0),
       fechaSancion: dto.fechaSancion ? new Date(dto.fechaSancion) as any : new Date() as any,
+      fechaInicioSuspension: dto.fechaInicioSuspension ? new Date(dto.fechaInicioSuspension) as any : null,
+      fechaFinSuspension: dto.fechaFinSuspension ? new Date(dto.fechaFinSuspension) as any : null,
       activo: true,
     });
 
     // Si viene reglaSancionId y no se indicaron partidos manualmente, tomarlos de la regla
     if (dto.reglaSancionId && !dto.partidosSuspension) {
       const reglaRef = await this.reglaSancionRepo.findOne({ where: { id: dto.reglaSancionId } });
-      if (reglaRef?.partidosSuspension) {
-        sancion.partidosSuspension = reglaRef.partidosSuspension;
-        sancion.suspensionActiva = reglaRef.partidosSuspension > 0;
+      if (reglaRef) {
+        if (reglaRef.modoCastigo === 'tiempo' && reglaRef.duracionMeses) {
+          // Suspensión por tiempo: calcular fechaFin a partir de fechaInicio
+          const fechaInicio = sancion.fechaSancion
+            ? new Date(sancion.fechaSancion)
+            : new Date();
+          const fechaFin = new Date(fechaInicio);
+          fechaFin.setMonth(fechaFin.getMonth() + reglaRef.duracionMeses);
+          sancion.fechaInicioSuspension = fechaInicio as any;
+          sancion.fechaFinSuspension    = fechaFin as any;
+          sancion.suspensionActiva      = new Date() <= fechaFin;
+          sancion.partidosSuspension    = 0;
+        } else if (reglaRef.partidosSuspension) {
+          sancion.partidosSuspension = reglaRef.partidosSuspension;
+          sancion.suspensionActiva   = reglaRef.partidosSuspension > 0;
+        }
       }
     }
 
@@ -320,7 +340,10 @@ export class SancionesService {
       query.andWhere('sancion.tipo_sancion_id = :tipoId', { tipoId: filtros.tipoSancionId });
     }
     if (filtros.soloActivas) {
-      query.andWhere('sancion.suspension_activa = true');
+      query.andWhere(
+        '(sancion.suspension_activa = true OR ' +
+        '(sancion.fecha_fin_suspension IS NOT NULL AND sancion.fecha_fin_suspension >= CURRENT_DATE))',
+      );
     }
 
     return query
@@ -376,6 +399,140 @@ export class SancionesService {
     sancion.suspensionActiva = false;
     await this.sancionRepo.save(sancion);
     return { message: `Sanción #${id} anulada correctamente.` };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ARRASTRE DE SANCIONES ENTRE CAMPEONATOS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Busca suspensiones activas de un jugador en campeonatos ANTERIORES de la
+   * misma liga que aún tienen pendientes (partidos o tiempo).
+   * Se usa para alertar al directivo al momento de inscribir al jugador.
+   */
+  async obtenerSuspensionesArrastradas(
+    jugadorId: number,
+    ligaId: number,
+    nuevoCampeonatoId: number,
+  ): Promise<Sancion[]> {
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    const suspensiones = await this.sancionRepo
+      .createQueryBuilder('sancion')
+      .leftJoinAndSelect('sancion.tipoSancion', 'tipo')
+      .leftJoinAndSelect('sancion.reglaSancion', 'regla')
+      .leftJoinAndSelect('sancion.campeonato', 'campeonato')
+      .leftJoinAndSelect('sancion.equipo', 'equipo')
+      .where('sancion.jugador_id = :jugadorId', { jugadorId })
+      .andWhere('sancion.liga_id = :ligaId', { ligaId })
+      .andWhere('sancion.campeonato_id != :nuevoCampeonatoId', { nuevoCampeonatoId })
+      .andWhere('sancion.suspension_activa = true')
+      .andWhere('sancion.activo = true')
+      // No debe haber sido ya transferida a este campeonato (evitar doble arrastre)
+      .andWhere(
+        'NOT EXISTS (' +
+        '  SELECT 1 FROM sanciones s2' +
+        '  WHERE s2.origen_sancion_id = sancion.id' +
+        '    AND s2.campeonato_id = :nuevoCampeonatoId' +
+        '    AND s2.activo = true' +
+        ')',
+        { nuevoCampeonatoId },
+      )
+      .orderBy('sancion.fecha_sancion', 'ASC')
+      .getMany();
+
+    return suspensiones;
+  }
+
+  /**
+   * Transfiere una suspensión pendiente al nuevo campeonato.
+   *
+   * Para 'partidos': crea nueva sanción con los partidos que faltan.
+   * Para 'tiempo':   crea nueva sanción heredando la misma fechaFin (ya es date-based).
+   *
+   * La sanción original queda cerrada (suspensionActiva = false).
+   */
+  async transferirSancion(
+    sancionId: number,
+    nuevoCampeonatoId: number,
+    usuario: any,
+  ): Promise<Sancion> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Solo master o directivo_liga pueden transferir sanciones.');
+    }
+
+    const original = await this.sancionRepo.findOne({
+      where: { id: sancionId, activo: true, suspensionActiva: true },
+      relations: ['campeonato', 'reglaSancion'],
+    });
+    if (!original) throw new NotFoundException(`Sanción #${sancionId} no encontrada o no está activa.`);
+
+    // Verificar que no se haya transferido ya a este campeonato
+    const yaTransferida = await this.sancionRepo.findOne({
+      where: {
+        origenSancionId: sancionId,
+        campeonatoId: nuevoCampeonatoId,
+        activo: true,
+      },
+    });
+    if (yaTransferida) {
+      throw new BadRequestException('Esta sanción ya fue transferida a ese campeonato.');
+    }
+
+    // Obtener datos del nuevo campeonato para ligaId
+    const nuevoCampeonato = await this.campeonatoRepo.findOne({ where: { id: nuevoCampeonatoId } });
+    if (!nuevoCampeonato) throw new NotFoundException(`Campeonato #${nuevoCampeonatoId} no encontrado.`);
+
+    // Buscar la inscripción del jugador en el nuevo campeonato para el equipoId actual
+    const jc = await this.jugadorCampeonatoRepo.findOne({
+      where: {
+        jugadorId: original.jugadorId!,
+        campeonatoId: nuevoCampeonatoId,
+        activo: true,
+      },
+      order: { id: 'DESC' },
+    });
+
+    // Calcular partidos pendientes (para modo 'partidos')
+    const partidosPendientes =
+      (original.partidosSuspension ?? 0) - (original.partidosCumplidos ?? 0);
+
+    const descripcionArrastre =
+      `Arrastrada del campeonato "${original.campeonato?.nombre ?? '#' + original.campeonatoId}"`;
+
+    const nueva = this.sancionRepo.create({
+      tipoSancionId:        original.tipoSancionId,
+      ligaId:               nuevoCampeonato.ligaId,
+      campeonatoId:         nuevoCampeonatoId,
+      categoriaId:          jc?.categoriaId ?? original.categoriaId,
+      jugadorId:            original.jugadorId,
+      equipoId:             jc?.equipoId ?? original.equipoId,
+      reglaSancionId:       original.reglaSancionId ?? undefined,
+      descripcion:          descripcionArrastre,
+      // Por partidos
+      partidosSuspension:   original.reglaSancion?.modoCastigo === 'tiempo' ? 0 : Math.max(0, partidosPendientes),
+      partidosCumplidos:    0,
+      // Por tiempo: heredar misma fechaFin
+      fechaInicioSuspension: original.reglaSancion?.modoCastigo === 'tiempo'
+        ? new Date() as any
+        : null,
+      fechaFinSuspension:   original.reglaSancion?.modoCastigo === 'tiempo'
+        ? original.fechaFinSuspension
+        : null,
+      suspensionActiva:     true,
+      fechaSancion:         new Date() as any,
+      origenSancionId:      original.id,
+      activo:               true,
+    });
+
+    const nuevaGuardada = await this.sancionRepo.save(nueva) as Sancion;
+
+    // Cerrar la sanción original
+    original.suspensionActiva = false;
+    await this.sancionRepo.save(original);
+
+    return nuevaGuardada;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -436,6 +593,15 @@ export class SancionesService {
 
       // Levantar la suspensión si el jugador completó todos los partidos
       if (s.partidosSuspension > 0 && s.partidosCumplidos >= s.partidosSuspension) {
+        s.suspensionActiva = false;
+      }
+    }
+
+    // Desactivar también suspensiones por tiempo cuya fecha de fin ya pasó
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    for (const s of suspensiones) {
+      if (s.suspensionActiva && s.fechaFinSuspension && new Date(s.fechaFinSuspension) < hoy) {
         s.suspensionActiva = false;
       }
     }

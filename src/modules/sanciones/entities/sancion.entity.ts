@@ -154,6 +154,21 @@ export class Sancion {
   @Column({ name: 'fecha_sancion', type: 'date', nullable: true })
   fechaSancion: Date;
 
+  /** Fecha de inicio de la suspensión cuando modoCastigo = 'tiempo'. */
+  @Column({ name: 'fecha_inicio_suspension', type: 'date', nullable: true })
+  fechaInicioSuspension: Date | null;
+
+  /** Fecha de vencimiento de la suspensión cuando modoCastigo = 'tiempo'. */
+  @Column({ name: 'fecha_fin_suspension', type: 'date', nullable: true })
+  fechaFinSuspension: Date | null;
+
+  /**
+   * Si esta sanción fue arrastrada de un campeonato anterior,
+   * aquí se guarda el ID de la sanción original (auditoría).
+   */
+  @Column({ name: 'origen_sancion_id', type: 'int', nullable: true })
+  origenSancionId: number | null;
+
   /**
    * Soft delete: false = anulada/eliminada del sistema.
    */

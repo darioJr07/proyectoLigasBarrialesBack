@@ -12,6 +12,7 @@ import { Equipo } from '../equipos/entities/equipo.entity';
 import { Categoria } from '../categorias/entities/categoria.entity';
 import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
 import { Transferencia } from '../transferencias/entities/transferencia.entity';
+import { Sancion } from '../sanciones/entities/sancion.entity';
 
 @Injectable()
 export class JugadorCampeonatosService {
@@ -30,6 +31,8 @@ export class JugadorCampeonatosService {
     private inscripcionRepo: Repository<Inscripcion>,
     @InjectRepository(Transferencia)
     private transferenciaRepo: Repository<Transferencia>,
+    @InjectRepository(Sancion)
+    private sancionRepo: Repository<Sancion>,
   ) {}
 
   async create(dto: CreateJugadorCampeonatoDto, usuario: any): Promise<JugadorCampeonato> {
@@ -659,5 +662,55 @@ export class JugadorCampeonatosService {
     // Soft delete
     jugadorCampeonato.activo = false;
     await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ARRASTRE DE SANCIONES
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Devuelve suspensiones activas del jugador en campeonatos ANTERIORES de la
+   * misma liga. Se llama justo después de habilitar al jugador para alertar
+   * al directivo si tiene partidos/tiempo pendientes.
+   * Solo accesible para master y directivo_liga.
+   */
+  async suspensionesArrastradasAlInscribir(
+    jugadorId: number,
+    nuevoCampeonatoId: number,
+    usuario: any,
+  ): Promise<Sancion[]> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Sin permisos para consultar suspensiones.');
+    }
+
+    // Obtener ligaId del campeonato destino
+    const campeonato = await this.campeonatoRepo.findOne({ where: { id: nuevoCampeonatoId } });
+    if (!campeonato) throw new NotFoundException('Campeonato no encontrado.');
+
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+
+    return this.sancionRepo
+      .createQueryBuilder('sancion')
+      .leftJoinAndSelect('sancion.tipoSancion', 'tipo')
+      .leftJoinAndSelect('sancion.campeonato', 'campeonato')
+      .leftJoinAndSelect('sancion.reglaSancion', 'regla')
+      .where('sancion.jugador_id = :jugadorId', { jugadorId })
+      .andWhere('sancion.liga_id = :ligaId', { ligaId: campeonato.ligaId })
+      .andWhere('sancion.campeonato_id != :nuevoCampeonatoId', { nuevoCampeonatoId })
+      .andWhere('sancion.suspension_activa = true')
+      .andWhere('sancion.activo = true')
+      // Excluir las que ya fueron transferidas a este campeonato
+      .andWhere(
+        'NOT EXISTS (' +
+        '  SELECT 1 FROM sanciones s2' +
+        '  WHERE s2.origen_sancion_id = sancion.id' +
+        '    AND s2.campeonato_id = :nuevoCampeonatoId' +
+        '    AND s2.activo = true' +
+        ')',
+        { nuevoCampeonatoId },
+      )
+      .orderBy('sancion.fecha_sancion', 'ASC')
+      .getMany();
   }
 }
