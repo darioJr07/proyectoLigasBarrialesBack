@@ -33,19 +33,19 @@ export class CampeonatosController {
   }
 
   @Get()
-  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   findAll(@Request() req: any) {
     return this.campeonatosService.findAll(req.user);
   }
 
   @Get('liga/:ligaId')
-  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   findByLiga(@Param('ligaId', ParseIntPipe) ligaId: number, @Request() req: any) {
     return this.campeonatosService.findByLiga(ligaId, req.user);
   }
 
   @Get(':id')
-  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   findOne(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
     return this.campeonatosService.findOne(id, req.user);
   }

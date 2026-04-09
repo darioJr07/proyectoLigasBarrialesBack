@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -150,15 +151,35 @@ export class UsuariosService {
 
   /**
    * Cambia la contraseña de un usuario
-   * @param id ID del usuario
+   * @param id ID del usuario objetivo
    * @param changePasswordDto Nueva contraseña
+   * @param requester Usuario que realiza la acción
    * @returns Mensaje de confirmación
    */
   async changePassword(
     id: number,
     changePasswordDto: ChangePasswordDto,
+    requester: Usuario,
   ): Promise<{ message: string }> {
     const usuario = await this.findOne(id);
+
+    const rolRequester = requester.rol?.nombre;
+
+    // Directivo_liga: solo puede cambiar contraseña de su propio usuario
+    // o de otros directivo_liga de la misma liga
+    if (rolRequester === 'directivo_liga') {
+      const esElMismo = requester.id === id;
+      const esDirectivoMismaLiga =
+        usuario.rol?.nombre === 'directivo_liga' &&
+        requester.ligaId != null &&
+        usuario.ligaId === requester.ligaId;
+
+      if (!esElMismo && !esDirectivoMismaLiga) {
+        throw new ForbiddenException(
+          'No tienes permisos para cambiar la contraseña de este usuario',
+        );
+      }
+    }
 
     // Hashear la nueva contraseña
     const hashedPassword = await this.hashPassword(

@@ -120,7 +120,7 @@ export class SancionesController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles('master', 'directivo_liga')
+  @Roles('master', 'directivo_liga', 'tribuna_penas')
   registrar(@Body() dto: CreateSancionDto, @Request() req: any) {
     return this.sancionesService.registrarSancion(dto, req.user);
   }

@@ -32,13 +32,13 @@ export class CategoriasController {
   }
 
   @Get()
-  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   findAll(@Request() req: any) {
     return this.categoriasService.findAll(req.user);
   }
 
   @Get('campeonato/:campeonatoId')
-  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   findByCampeonato(
     @Param('campeonatoId', ParseIntPipe) campeonatoId: number,
     @Request() req: any,
@@ -47,7 +47,7 @@ export class CategoriasController {
   }
 
   @Get(':id')
-  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   findOne(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
     return this.categoriasService.findOne(id, req.user);
   }

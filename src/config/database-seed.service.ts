@@ -40,6 +40,8 @@ export class DatabaseSeedService implements OnModuleInit {
       { nombre: 'master', descripcion: 'Administrador del sistema con acceso total' },
       { nombre: 'directivo_liga', descripcion: 'Directivo de una liga' },
       { nombre: 'dirigente_equipo', descripcion: 'Dirigente de un equipo' },
+      { nombre: 'tribuna_penas', descripcion: 'Miembro de la Tribuna de Penas' },
+      { nombre: 'tesoreria', descripcion: 'Responsable de Tesorería' },
     ];
 
     for (const rolData of roles) {

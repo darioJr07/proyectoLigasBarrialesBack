@@ -299,8 +299,8 @@ export class ActaPartidoService {
    * Es la vista del Tribunal de Penas: ve todo lo que tiene que procesar.
    */
   async listarIncidenciasPendientes(campeonatoId: number, usuario: any) {
-    if (!['master', 'directivo_liga'].includes(usuario.role)) {
-      throw new ForbiddenException('Solo master o directivo_liga pueden acceder al tribunal.');
+    if (!['master', 'directivo_liga', 'tribuna_penas'].includes(usuario.role)) {
+      throw new ForbiddenException('Solo master, directivo_liga o tribuna_penas pueden acceder al tribunal.');
     }
 
     return this.incidenciaRepo.find({
@@ -323,8 +323,8 @@ export class ActaPartidoService {
     dto: ResolverIncidenciaDto,
     usuario: any,
   ): Promise<ActaIncidencia> {
-    if (!['master', 'directivo_liga'].includes(usuario.role)) {
-      throw new ForbiddenException('Solo master o directivo_liga pueden resolver incidencias.');
+    if (!['master', 'directivo_liga', 'tribuna_penas'].includes(usuario.role)) {
+      throw new ForbiddenException('Solo master, directivo_liga o tribuna_penas pueden resolver incidencias.');
     }
 
     const incidencia = await this.incidenciaRepo.findOne({

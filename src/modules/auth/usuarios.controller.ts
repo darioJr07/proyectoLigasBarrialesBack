@@ -12,7 +12,9 @@ import {
   ParseIntPipe,
   UseInterceptors,
   ClassSerializerInterceptor,
+  Req,
 } from '@nestjs/common';
+import { Request } from 'express';
 import { UsuariosService } from './usuarios.service';
 import { CreateUsuarioDto } from './dto/create-usuario.dto';
 import { UpdateUsuarioDto } from './dto/update-usuario.dto';
@@ -81,8 +83,9 @@ export class UsuariosController {
   changePassword(
     @Param('id', ParseIntPipe) id: number,
     @Body() changePasswordDto: ChangePasswordDto,
+    @Req() req: Request,
   ) {
-    return this.usuariosService.changePassword(id, changePasswordDto);
+    return this.usuariosService.changePassword(id, changePasswordDto, (req as any).user);
   }
 
   /**

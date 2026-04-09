@@ -124,7 +124,7 @@ export class PartidosController {
    */
   @Get()
   @UseGuards(RolesGuard)
-  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   findAll(@Request() req: any) {
     return this.partidosService.findAll(req.user);
   }
@@ -136,7 +136,7 @@ export class PartidosController {
    */
   @Get('campeonato/:campeonatoId')
   @UseGuards(RolesGuard)
-  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   findByCampeonato(
     @Param('campeonatoId', ParseIntPipe) campeonatoId: number,
     @Query('categoriaId') categoriaId?: string,
@@ -157,7 +157,7 @@ export class PartidosController {
    */
   @Get('jornada')
   @UseGuards(RolesGuard)
-  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   findByJornada(
     @Query('campeonatoId') campeonatoId: string,
     @Query('categoriaId') categoriaId: string,
@@ -178,7 +178,7 @@ export class PartidosController {
    */
   @Get('etapas')
   @UseGuards(RolesGuard)
-  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   getEtapas(
     @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
     @Query('categoriaId', ParseIntPipe) categoriaId: number,
@@ -192,7 +192,7 @@ export class PartidosController {
    */
   @Get(':id')
   @UseGuards(RolesGuard)
-  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.partidosService.findOne(id);
   }
