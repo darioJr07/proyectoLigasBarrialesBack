@@ -7,10 +7,16 @@ import { join } from 'path';
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // Habilitar CORS para desarrollo (permite cualquier origen en desarrollo)
+  // Habilitar CORS — orígenes permitidos vía variable de entorno CORS_ORIGIN
+  const allowedOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
+    : true; // en desarrollo permite cualquier origen
+
   app.enableCors({
-    origin: true, // Permite cualquier origen en desarrollo
+    origin: allowedOrigins,
     credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
   // Servir archivos estáticos desde la carpeta uploads
