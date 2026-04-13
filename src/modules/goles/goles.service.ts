@@ -1,9 +1,10 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { Gol } from './entities/gol.entity';
 import { CreateGolDto } from './dto/create-gol.dto';
 import { Partido } from '../partidos/entities/partido.entity';
+import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
 
 /**
  * Fila de la tabla de goleadores para un jugador.
@@ -17,6 +18,7 @@ export interface FilaGoleador {
   total: number;     // Total de goles (incluye penales, excluye autogoles de la cuenta personal)
   penales: number;   // De los totales, cuántos fueron penal
   autogoles: number; // Goles en contra (informativos, no suman al total del jugador)
+  numeroCancha: number | null; // Número de camiseta de la habilitación del jugador
 }
 
 @Injectable()
@@ -24,6 +26,8 @@ export class GolesService {
   constructor(
     @InjectRepository(Gol)
     private readonly golesRepository: Repository<Gol>,
+    @InjectRepository(JugadorCampeonato)
+    private readonly jugadorCampeonatoRepository: Repository<JugadorCampeonato>,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -147,6 +151,7 @@ export class GolesService {
           total: 0,
           penales: 0,
           autogoles: 0,
+          numeroCancha: null, // se rellena después con la query de habilitaciones
         });
       }
 
@@ -163,16 +168,30 @@ export class GolesService {
       }
     }
 
+    // Obtener números de camiseta de las habilitaciones del campeonato/categoría
+    const jugadorIds = Array.from(mapa.keys());
+    const habilitaciones = jugadorIds.length > 0
+      ? await this.jugadorCampeonatoRepository.find({
+          where: { campeonatoId, jugadorId: In(jugadorIds) },
+          select: ['jugadorId', 'numeroCancha'],
+          order: { id: 'ASC' },
+        })
+      : [];
+    const numMap = new Map<number, number | null>(
+      habilitaciones.map((h) => [h.jugadorId, h.numeroCancha ?? null]),
+    );
+
     // Ordenar: total DESC, luego nombre ASC
     const lista = Array.from(mapa.values()).sort((a, b) => {
       if (b.total !== a.total) return b.total - a.total;
       return a.jugadorNombre.localeCompare(b.jugadorNombre);
     });
 
-    // Asignar posición
+    // Asignar posición y número de camiseta
     return lista.map((fila, index) => ({
       posicion: index + 1,
       ...fila,
+      numeroCancha: numMap.get(fila.jugadorId) ?? null,
     }));
   }
 
