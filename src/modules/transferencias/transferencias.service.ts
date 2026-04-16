@@ -384,7 +384,7 @@ export class TransferenciasService {
       .where('id = :jugadorId', { jugadorId: transferencia.jugadorId })
       .execute();
 
-    // 2. Desactivar la ficha de habilitación del jugador en el equipo origen (si existe)
+    // 2. Dar de baja la ficha de habilitación del jugador en el equipo origen (si existe)
     await this.jugadorCampeonatoRepo.update(
       {
         jugadorId: transferencia.jugadorId,
@@ -392,9 +392,9 @@ export class TransferenciasService {
         equipoId: transferencia.equipoOrigenId,
         activo: true,
       },
-      { activo: false },
+      { activo: false, estado: 'baja' },
     );
-    console.log(`✓ Ficha de habilitación del equipo origen desactivada (si existía)`);
+    console.log(`✓ Ficha de habilitación del equipo origen marcada como baja e inactiva (si existía)`);
 
     console.log(`✓ UPDATE ejecutado`);
     console.log(`  - Filas afectadas: ${updateResult.affected}`);
