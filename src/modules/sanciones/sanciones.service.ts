@@ -304,6 +304,7 @@ export class SancionesService {
       equipoId?: number;
       tipoSancionId?: number;
       soloActivas?: boolean;
+      incluirAnuladas?: boolean;
     },
     usuario: any,
   ): Promise<Sancion[]> {
@@ -315,7 +316,20 @@ export class SancionesService {
       .leftJoinAndSelect('sancion.equipo', 'equipo')
       .leftJoinAndSelect('sancion.campeonato', 'campeonato')
       .leftJoinAndSelect('sancion.categoria', 'categoria')
-      .where('sancion.activo = true');
+      // Número de cancha del jugador en ESTE campeonato y equipo (de la calificación)
+      .leftJoin(
+        'jugador_campeonatos',
+        'jc',
+        'jc.jugador_id = sancion.jugador_id AND jc.campeonato_id = sancion.campeonato_id AND jc.equipo_id = sancion.equipo_id AND jc.activo = true',
+      )
+      .addSelect('jc.numero_cancha', 'numeroCanchaCalificacion');
+
+    // Si NO se piden anuladas, filtrar solo las activas (comportamiento por defecto)
+    if (!filtros.incluirAnuladas) {
+      query.where('sancion.activo = true');
+    } else {
+      query.where('1=1'); // sin restricción de activo
+    }
 
     // Restricción por rol
     if (usuario.role === 'directivo_liga') {
@@ -346,10 +360,16 @@ export class SancionesService {
       );
     }
 
-    return query
+    const { entities, raw } = await query
       .orderBy('sancion.fecha_sancion', 'DESC')
       .addOrderBy('sancion.creado_en', 'DESC')
-      .getMany();
+      .getRawAndEntities();
+
+    // Mapear numeroCanchaCalificacion desde los raw results (viene del LEFT JOIN a jugador_campeonatos)
+    return entities.map((sancion, i) => {
+      (sancion as any).numeroCanchaCalificacion = raw[i]?.numeroCanchaCalificacion ?? null;
+      return sancion;
+    }) as Sancion[];
   }
 
   /**
@@ -387,10 +407,66 @@ export class SancionesService {
   }
 
   /**
+   * Apelación / reemplazo de una sanción existente.
+   *
+   * LÓGICA:
+   *   1. Anula la sanción original (activo=false, suspensionActiva=false).
+   *   2. Crea una nueva sanción heredando: jugador, equipo, campeonato,
+   *      partido, categoría y los partidos ya cumplidos de la original.
+   *   3. Si los partidos ya cumplidos >= partidos de la nueva sanción,
+   *      la nueva sanción arranca directamente como inactiva (ya cumplida).
+   *   4. Vincula origenSancionId a la sanción original para trazabilidad.
+   */
+  async apelarSancion(id: number, dto: import('./dto/apelar-sancion.dto').ApelarSancionDto, usuario: any): Promise<Sancion> {
+    if (!['master', 'directivo_liga', 'tribuna_penas'].includes(usuario.role)) {
+      throw new ForbiddenException('Sin permisos para apelar sanciones.');
+    }
+
+    const original = await this.sancionRepo.findOne({ where: { id, activo: true } });
+    if (!original) throw new NotFoundException(`Sanción #${id} no encontrada o ya fue anulada.`);
+
+    // Anular la sanción original
+    original.activo = false;
+    original.suspensionActiva = false;
+    await this.sancionRepo.save(original);
+
+    const partidosCumplidos = original.partidosCumplidos ?? 0;
+    const nuevosPartidosSuspension = dto.partidosSuspension ?? 0;
+
+    // Si ya cumplió igual o más partidos que los de la nueva sanción → ya está libre
+    const suspensionActiva =
+      dto.fechaFinSuspension
+        ? true  // modo tiempo: la fecha controla la vigencia
+        : partidosCumplidos < nuevosPartidosSuspension;
+
+    const nueva = this.sancionRepo.create({
+      tipoSancionId:         dto.tipoSancionId,
+      reglaSancionId:        dto.reglaSancionId ?? undefined,
+      ligaId:                original.ligaId,
+      campeonatoId:          original.campeonatoId,
+      categoriaId:           original.categoriaId ?? undefined,
+      partidoId:             original.partidoId ?? undefined,
+      jugadorId:             original.jugadorId ?? undefined,
+      equipoId:              original.equipoId ?? undefined,
+      descripcion:           dto.descripcion ?? undefined,
+      partidosSuspension:    nuevosPartidosSuspension,
+      partidosCumplidos,
+      suspensionActiva,
+      fechaSancion:          dto.fechaSancion ? (dto.fechaSancion as any) : (new Date() as any),
+      fechaInicioSuspension: dto.fechaInicioSuspension ? (dto.fechaInicioSuspension as any) : null,
+      fechaFinSuspension:    dto.fechaFinSuspension ? (dto.fechaFinSuspension as any) : null,
+      origenSancionId:       original.id,
+      activo:                true,
+    });
+
+    return this.sancionRepo.save(nueva) as Promise<Sancion>;
+  }
+
+  /**
    * Anula (soft delete) una sanción.
    */
   async anularSancion(id: number, usuario: any): Promise<{ message: string }> {
-    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+    if (!['master', 'directivo_liga', 'tribuna_penas'].includes(usuario.role)) {
       throw new ForbiddenException('Sin permisos para anular sanciones.');
     }
     const sancion = await this.sancionRepo.findOne({ where: { id } });
@@ -493,6 +569,16 @@ export class SancionesService {
       },
       order: { id: 'DESC' },
     });
+
+    // El jugador DEBE estar inscrito en el nuevo campeonato antes de transferir.
+    // Sin habilitación activa, no se conoce el equipo correcto y los partidos
+    // cumplidos nunca se contarían (procesarPartidosCumplidos filtra por equipoId).
+    if (!jc) {
+      throw new BadRequestException(
+        'El jugador no tiene una habilitación activa en el campeonato destino. ' +
+        'Debe inscribirse primero antes de transferir la sanción.',
+      );
+    }
 
     // Calcular partidos pendientes (para modo 'partidos')
     const partidosPendientes =

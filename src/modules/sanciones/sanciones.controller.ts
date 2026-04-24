@@ -18,6 +18,7 @@ import { CreateReglaSancionDto } from './dto/create-regla-sancion.dto';
 import { UpdateReglaSancionDto } from './dto/update-regla-sancion.dto';
 import { CreateSancionDto } from './dto/create-sancion.dto';
 import { UpdateSancionDto } from './dto/update-sancion.dto';
+import { ApelarSancionDto } from './dto/apelar-sancion.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -134,6 +135,7 @@ export class SancionesController {
     @Query('equipoId') equipoId?: string,
     @Query('tipoSancionId') tipoSancionId?: string,
     @Query('soloActivas') soloActivas?: string,
+    @Query('incluirAnuladas') incluirAnuladas?: string,
   ) {
     return this.sancionesService.listarSanciones(
       {
@@ -143,6 +145,7 @@ export class SancionesController {
         equipoId: equipoId ? Number(equipoId) : undefined,
         tipoSancionId: tipoSancionId ? Number(tipoSancionId) : undefined,
         soloActivas: soloActivas === 'true',
+        incluirAnuladas: incluirAnuladas === 'true',
       },
       req.user,
     );
@@ -164,9 +167,25 @@ export class SancionesController {
     return this.sancionesService.actualizarSancion(id, dto, req.user);
   }
 
+  /**
+   * PATCH /sanciones/:id/apelar
+   * Anula la sanción original y crea una nueva con el nuevo tipo/sanción,
+   * heredando jugador/equipo/campeonato/partido y los partidos ya cumplidos.
+   */
+  @Patch(':id/apelar')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga', 'tribuna_penas')
+  apelar(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ApelarSancionDto,
+    @Request() req: any,
+  ) {
+    return this.sancionesService.apelarSancion(id, dto, req.user);
+  }
+
   @Delete(':id')
   @UseGuards(RolesGuard)
-  @Roles('master', 'directivo_liga')
+  @Roles('master', 'directivo_liga', 'tribuna_penas')
   anular(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
     return this.sancionesService.anularSancion(id, req.user);
   }
