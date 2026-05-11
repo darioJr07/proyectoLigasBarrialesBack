@@ -430,6 +430,12 @@ export class PartidosService {
       );
     }
 
+    // Capturamos si el partido YA estaba jugado ANTES de modificarlo.
+    // Esto nos permite saber si es un primer registro (false) o una edición (true).
+    // Si es edición, no volvemos a contar partidos cumplidos en las sanciones
+    // para evitar que una sanción de 3 partidos se descuente 2 veces con 1 partido real.
+    const eraJugado = partido.estado === 'jugado';
+
     partido.golesLocal = dto.golesLocal;
     partido.golesVisitante = dto.golesVisitante;
     partido.bonificacionLocal = dto.bonificacionLocal ?? 0;
@@ -447,8 +453,11 @@ export class PartidosService {
       await this.golesService.registrarGoles(partidoGuardado, dto.autoresGoles);
     }
 
-    // Procesar partidos cumplidos para suspensiones activas de ambos equipos
-    if (partidoGuardado.equipoLocalId && partidoGuardado.equipoVisitanteId) {
+    // Procesar partidos cumplidos para suspensiones activas de ambos equipos.
+    // SOLO se ejecuta la primera vez (cuando el partido pasa a 'jugado').
+    // Si ya era 'jugado' (edición del resultado), no se vuelve a contar
+    // para evitar doble descuento en sanciones.
+    if (!eraJugado && partidoGuardado.equipoLocalId && partidoGuardado.equipoVisitanteId) {
       await this.sancionesService.procesarPartidosCumplidos(
         partidoGuardado.campeonatoId,
         partidoGuardado.equipoLocalId,
