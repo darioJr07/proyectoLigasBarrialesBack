@@ -231,6 +231,17 @@ export class SancionesService {
       }
     }
 
+    // ── Garantía: sanciones a equipo/barra/directivo nunca suspenden partidos ──
+    // Un equipo o barra no puede "cumplir partidos de suspensión"; solo se registra
+    // la sanción como historial y para acumulación de conteo.
+    const tipoRef = await this.tipoSancionRepo.findOne({ where: { id: dto.tipoSancionId } });
+    if (tipoRef && tipoRef.aplicaA !== 'jugador') {
+      sancion.partidosSuspension    = 0;
+      sancion.suspensionActiva      = false;
+      sancion.fechaInicioSuspension = null;
+      sancion.fechaFinSuspension    = null;
+    }
+
     const sancionGuardada = await this.sancionRepo.save(sancion) as Sancion;
 
     // ── Evaluar acumulación automática si aplica ─────────────────────────────
