@@ -20,6 +20,9 @@ import { TablaPosicionesModule } from './modules/tabla-posiciones/tabla-posicion
 import { GolesModule } from './modules/goles/goles.module';
 import { SancionesModule } from './modules/sanciones/sanciones.module';
 import { ActaPartidoModule } from './modules/acta-partido/acta-partido.module';
+import { TesoreriaModule } from './modules/tesoreria/tesoreria.module';
+import { GarantiasModule } from './modules/garantias/garantias.module';
+import { DerramasModule } from './modules/derramas/derramas.module';
 import { ConfiguracionSistema } from './modules/configuracion/entities/configuracion-sistema.entity';
 import { Rol } from './modules/auth/entities/rol.entity';
 import { Usuario } from './modules/auth/entities/usuario.entity';
@@ -61,6 +64,9 @@ import { Usuario } from './modules/auth/entities/usuario.entity';
     GolesModule,
     SancionesModule,
     ActaPartidoModule,
+    TesoreriaModule,
+    GarantiasModule,
+    DerramasModule,
   ],
   controllers: [HealthController],
   providers: [DatabaseSeedService],

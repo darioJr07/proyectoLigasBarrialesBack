@@ -364,6 +364,16 @@ export class ActaPartidoService {
       if (dto.fechaFinSuspension)    sancion.fechaFinSuspension    = new Date(dto.fechaFinSuspension) as any;
       sancion.activo = true;
 
+      // Multa económica aprobada por el tribunal
+      if (dto.montoMulta != null && Number(dto.montoMulta) > 0) {
+        sancion.montoMulta  = Number(dto.montoMulta);
+        sancion.estadoCobro = 'aprobada';
+      } else {
+        sancion.montoMulta  = null;
+        sancion.estadoCobro = 'sin_multa';
+      }
+      sancion.cobrada = false;
+
       const sancionGuardada = await this.sancionRepo.save(sancion);
       incidencia.sancionId = sancionGuardada.id;
       incidencia.estadoResolucion = 'sancionado';

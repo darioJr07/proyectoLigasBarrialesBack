@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { TipoSancion } from './entities/tipo-sancion.entity';
 import { ReglaSancion } from './entities/regla-sancion.entity';
 import { Sancion } from './entities/sancion.entity';
@@ -704,5 +704,40 @@ export class SancionesService {
     }
 
     await this.sancionRepo.save(suspensiones);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // COBRO DE MULTAS EN VOCALÍA
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Retorna las sanciones aprobadas y aún no cobradas de un equipo en una liga.
+   * Se usa desde acta-imprimir para pre-llenar el campo "Tarjetas" de la vocalía.
+   */
+  async getSancionesParaCobro(equipoId: number, ligaId: number): Promise<Sancion[]> {
+    return this.sancionRepo.find({
+      where: {
+        equipoId,
+        ligaId,
+        estadoCobro: 'aprobada',
+        cobrada: false,
+        activo: true,
+      },
+      relations: ['tipoSancion', 'jugador'],
+      order: { creadoEn: 'ASC' },
+    });
+  }
+
+  /**
+   * Marca un conjunto de sanciones como cobradas.
+   * Se llama después de guardar el cobro-partido en tesorería.
+   */
+  async marcarCobradas(ids: number[]): Promise<{ actualizadas: number }> {
+    if (!ids?.length) return { actualizadas: 0 };
+    const result = await this.sancionRepo.update(
+      { id: In(ids), cobrada: false },
+      { cobrada: true },
+    );
+    return { actualizadas: result.affected ?? 0 };
   }
 }

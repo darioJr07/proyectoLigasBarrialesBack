@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsIn, IsNumber, IsBoolean, MaxLength } from 'class-validator';
+import { IsString, IsOptional, IsIn, IsNumber, IsBoolean, MaxLength, Min } from 'class-validator';
 
 export class UpdateTipoSancionDto {
   @IsOptional()
@@ -17,4 +17,9 @@ export class UpdateTipoSancionDto {
   @IsOptional()
   @IsBoolean()
   activo?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  montoMulta?: number | null;
 }

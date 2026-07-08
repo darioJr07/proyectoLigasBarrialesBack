@@ -38,6 +38,12 @@ export class UpdateReglaSancionDto {
   @Min(1)
   duracionMeses?: number;
 
+  /** Monto de multa económica por cada sanción de este tipo (ej: 2.50). */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  montoMulta?: number;
+
   @IsOptional()
   @IsBoolean()
   activo?: boolean;

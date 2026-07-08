@@ -63,4 +63,12 @@ export class ResolverIncidenciaDto {
   @IsOptional()
   @IsDateString()
   fechaFinSuspension?: string;
+
+  /**
+   * Monto de multa económica aprobado por el tribunal.
+   * Si se envía y es > 0, la sanción queda con estado_cobro='aprobada'
+   * y se cobrará en la próxima vocalía.
+   */
+  @IsOptional()
+  montoMulta?: number;
 }

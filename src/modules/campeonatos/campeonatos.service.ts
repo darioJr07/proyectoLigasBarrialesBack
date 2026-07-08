@@ -12,6 +12,7 @@ import { UpdateCampeonatoDto } from './dto/update-campeonato.dto';
 import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
 import { Categoria } from '../categorias/entities/categoria.entity';
 import { TablaPosicionesService } from '../tabla-posiciones/tabla-posiciones.service';
+import { DerramasService } from '../derramas/derramas.service';
 
 export interface MovimientoPreview {
   equipoId: number;
@@ -35,6 +36,7 @@ export class CampeonatosService {
     @InjectRepository(Categoria)
     private categoriasRepository: Repository<Categoria>,
     private tablaPosicionesService: TablaPosicionesService,
+    private derramasService: DerramasService,
   ) {}
 
   /**
@@ -257,7 +259,15 @@ export class CampeonatosService {
     }
 
     campeonato.estado = estado;
-    return await this.campeonatosRepository.save(campeonato);
+    const saved = await this.campeonatosRepository.save(campeonato);
+
+    // Al finalizar un campeonato, cerrar todas sus derramas activas
+    // y marcar los saldos pendientes como 'arrastrado'
+    if (estado === 'finalizado') {
+      await this.derramasService.cerrarPorCampeonato(id);
+    }
+
+    return saved;
   }
 
   /**

@@ -113,7 +113,13 @@ export class ReglaSancion {
    */
   @Column({ name: 'duracion_meses', type: 'int', nullable: true })
   duracionMeses: number | null;
-
+  /**
+   * Monto de multa económica que aplica esta regla por cada sanción.
+   * Nullable → reglas sin multa simplemente no tienen valor.
+   * Ejemplo: 2.50 → "$ 2.50 por cada tarjeta amarilla"
+   */
+  @Column({ name: 'monto_multa', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  montoMulta: number | null;
   @Column({ type: 'boolean', default: true })
   activo: boolean;
 

@@ -6,11 +6,13 @@ import { Campeonato } from './entities/campeonato.entity';
 import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
 import { Categoria } from '../categorias/entities/categoria.entity';
 import { TablaPosicionesModule } from '../tabla-posiciones/tabla-posiciones.module';
+import { DerramasModule } from '../derramas/derramas.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Campeonato, Inscripcion, Categoria]),
     TablaPosicionesModule,
+    DerramasModule,
   ],
   controllers: [CampeonatosController],
   providers: [CampeonatosService],

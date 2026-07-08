@@ -13,6 +13,7 @@ import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { Categoria } from '../categorias/entities/categoria.entity';
 import { Equipo } from '../equipos/entities/equipo.entity';
 import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
+import { TesoreriaService } from '../tesoreria/tesoreria.service';
 
 @Injectable()
 export class InscripcionesService {
@@ -27,6 +28,7 @@ export class InscripcionesService {
     private equiposRepository: Repository<Equipo>,
     @InjectRepository(JugadorCampeonato)
     private jugadorCampeonatoRepository: Repository<JugadorCampeonato>,
+    private tesoreriaService: TesoreriaService,
   ) {}
 
   /**
@@ -396,6 +398,19 @@ export class InscripcionesService {
 
     if (!inscripcionActualizada) {
       throw new NotFoundException(`Inscripción con ID ${id} no encontrada después de actualizar`);
+    }
+
+    // ── Hook tesorería: generar cobro automático al confirmar inscripción ──
+    if (updateData.estado === 'confirmada' && inscripcionActualizada.campeonato) {
+      const camp = inscripcionActualizada.campeonato;
+      await this.tesoreriaService.generarCobroInscripcion(
+        camp.ligaId,
+        camp.id,
+        inscripcionActualizada.equipoId,
+        Number(camp.cuotaInscripcion ?? 0),
+        `Inscripción de ${inscripcionActualizada.equipo?.nombre ?? 'equipo'} — ${camp.nombre}`,
+        usuario.sub ?? usuario.id,
+      );
     }
 
     return inscripcionActualizada;

@@ -170,6 +170,30 @@ export class Sancion {
   origenSancionId: number | null;
 
   /**
+   * Snapshot del monto de multa al momento de crear la sanción.
+   * Se copia desde regla_sancion.monto_multa para preservar el historial
+   * aunque el monto de la regla cambie después.
+   * Nullable → sanciones sin componente económico no tienen valor.
+   */
+  @Column({ name: 'monto_multa', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  montoMulta: number | null;
+
+  /**
+   * Estado del cobro de la multa.
+   * 'sin_multa' → sanción sin componente económico
+   * 'aprobada'  → el tribunal aprobó el cobro (se cobrará en la próxima vocalía)
+   */
+  @Column({ name: 'estado_cobro', type: 'varchar', length: 20, default: 'sin_multa' })
+  estadoCobro: 'aprobada' | 'sin_multa';
+
+  /**
+   * Indica si la multa ya fue cobrada en vocalía.
+   * Se pone en true cuando el vocal guarda el cobro-partido de ese equipo.
+   */
+  @Column({ name: 'cobrada', type: 'boolean', default: false })
+  cobrada: boolean;
+
+  /**
    * Soft delete: false = anulada/eliminada del sistema.
    */
   @Column({ type: 'boolean', default: true })

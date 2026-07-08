@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsIn, IsNumber, IsBoolean, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsIn, IsNumber, IsBoolean, MaxLength, Min } from 'class-validator';
 
 export class CreateTipoSancionDto {
   @IsString()
@@ -17,4 +17,9 @@ export class CreateTipoSancionDto {
   @IsOptional()
   @IsNumber()
   ligaId?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  montoMulta?: number;
 }

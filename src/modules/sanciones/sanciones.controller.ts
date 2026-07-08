@@ -10,6 +10,7 @@ import {
   Query,
   UseGuards,
   Request,
+  BadRequestException,
 } from '@nestjs/common';
 import { SancionesService } from './sanciones.service';
 import { CreateTipoSancionDto } from './dto/create-tipo-sancion.dto';
@@ -222,5 +223,35 @@ export class SancionesController {
     @Request() req: any,
   ) {
     return this.sancionesService.transferirSancion(id, campeonatoId, req.user);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // COBRO DE MULTAS EN VOCALÍA
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * GET /sanciones/para-cobro?equipoId=&ligaId=
+   * Retorna sanciones aprobadas y no cobradas del equipo en la liga.
+   * Usado por acta-imprimir para pre-llenar el campo "Tarjetas".
+   */
+  @Get('para-cobro')
+  getSancionesParaCobro(
+    @Query('equipoId', ParseIntPipe) equipoId: number,
+    @Query('ligaId', ParseIntPipe) ligaId: number,
+  ) {
+    return this.sancionesService.getSancionesParaCobro(equipoId, ligaId);
+  }
+
+  /**
+   * POST /sanciones/marcar-cobradas
+   * Marca las sanciones indicadas como cobradas (cobrada=true).
+   * Se llama tras guardar el cobro-partido en tesorería.
+   */
+  @Post('marcar-cobradas')
+  marcarCobradas(@Body('ids') ids: number[]) {
+    if (!Array.isArray(ids) || !ids.length) {
+      throw new BadRequestException('Se requiere un array de IDs de sanciones.');
+    }
+    return this.sancionesService.marcarCobradas(ids);
   }
 }

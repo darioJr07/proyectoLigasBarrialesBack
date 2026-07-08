@@ -57,6 +57,13 @@ export class TipoSancion {
   liga: Liga;
 
   /**
+   * Monto de multa económica asociado a este tipo de sanción (opcional).
+   * Se usa como valor por defecto al crear reglas de sanción.
+   */
+  @Column({ name: 'monto_multa', type: 'decimal', precision: 10, scale: 2, nullable: true })
+  montoMulta: number | null;
+
+  /**
    * Soft delete: false = desactivado (no aparece en selectores).
    */
   @Column({ type: 'boolean', default: true })

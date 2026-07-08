@@ -60,6 +60,10 @@ export class Campeonato {
   })
   maxJugadoresHabilitados: number;
 
+  /** Cuota de inscripción por equipo. Al aprobar la inscripción se genera un cobro pendiente automático. */
+  @Column({ name: 'cuota_inscripcion', type: 'decimal', precision: 10, scale: 2, default: 0 })
+  cuotaInscripcion: number;
+
   @CreateDateColumn({ name: 'creado_en' })
   creadoEn: Date;
 

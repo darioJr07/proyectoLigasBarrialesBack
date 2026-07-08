@@ -7,6 +7,7 @@ import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campe
 import { CampeonatosModule } from '../campeonatos/campeonatos.module';
 import { CategoriasModule } from '../categorias/categorias.module';
 import { EquiposModule } from '../equipos/equipos.module';
+import { TesoreriaModule } from '../tesoreria/tesoreria.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { EquiposModule } from '../equipos/equipos.module';
     CampeonatosModule,
     CategoriasModule,
     EquiposModule,
+    TesoreriaModule,
   ],
   controllers: [InscripcionesController],
   providers: [InscripcionesService],
