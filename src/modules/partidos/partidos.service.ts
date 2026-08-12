@@ -12,12 +12,18 @@ import { UpdatePartidoDto } from './dto/update-partido.dto';
 import { RegistrarResultadoDto } from './dto/registrar-resultado.dto';
 import { GolesService } from '../goles/goles.service';
 import { SancionesService } from '../sanciones/sanciones.service';
+import { Gol } from '../goles/entities/gol.entity';
+import { ActaAlineacion } from '../acta-partido/entities/acta-alineacion.entity';
+import { ActaIncidencia } from '../acta-partido/entities/acta-incidencia.entity';
 
 @Injectable()
 export class PartidosService {
   constructor(
     @InjectRepository(Partido)
     private partidosRepository: Repository<Partido>,
+    @InjectRepository(Gol) private golesRepository: Repository<Gol>,
+    @InjectRepository(ActaAlineacion) private actaRepository: Repository<ActaAlineacion>,
+    @InjectRepository(ActaIncidencia) private incidenciaRepository: Repository<ActaIncidencia>,
     private readonly golesService: GolesService,
     private readonly sancionesService: SancionesService,
   ) {}
@@ -386,6 +392,14 @@ export class PartidosService {
 
     const partido = await this.findOne(id);
 
+    if (partido.estado === 'jugado' && dto.estado && dto.estado !== 'jugado') {
+      throw new BadRequestException('Un partido jugado no puede cambiarse de estado desde la edición normal. Use el flujo de anulación cuando esté disponible.');
+    }
+    const cambiaEquipos = (dto.equipoLocalId !== undefined && dto.equipoLocalId !== partido.equipoLocalId) || (dto.equipoVisitanteId !== undefined && dto.equipoVisitanteId !== partido.equipoVisitanteId);
+    if (cambiaEquipos && await this.tieneInformacionRelacionada(partido)) {
+      throw new BadRequestException('No se pueden cambiar los equipos de un partido con resultado, goles, acta o incidencias registradas.');
+    }
+
     if (dto.equipoLocalId !== undefined && dto.equipoVisitanteId !== undefined) {
       if (dto.equipoLocalId === dto.equipoVisitanteId) {
         throw new BadRequestException(
@@ -444,29 +458,32 @@ export class PartidosService {
     partido.estado = 'jugado';
     if (dto.observaciones) partido.observaciones = dto.observaciones;
 
-    const partidoGuardado = await this.partidosRepository.save(partido);
+    return this.partidosRepository.manager.transaction(async (manager) => {
+      const partidoGuardado = await manager.getRepository(Partido).save(partido);
 
     // Registrar goles individuales si se enviaron autores
     // Se hace DESPUÉS de guardar el partido para que golesLocal/golesVisitante
     // estén disponibles al validar la suma en GolesService
     if (dto.autoresGoles && dto.autoresGoles.length > 0) {
-      await this.golesService.registrarGoles(partidoGuardado, dto.autoresGoles);
+      await this.golesService.registrarGoles(partidoGuardado, dto.autoresGoles, manager);
     }
 
     // Procesar partidos cumplidos para suspensiones activas de ambos equipos.
     // SOLO se ejecuta la primera vez (cuando el partido pasa a 'jugado').
     // Si ya era 'jugado' (edición del resultado), no se vuelve a contar
     // para evitar doble descuento en sanciones.
-    if (!eraJugado && partidoGuardado.equipoLocalId && partidoGuardado.equipoVisitanteId) {
+    if (partidoGuardado.equipoLocalId && partidoGuardado.equipoVisitanteId) {
       await this.sancionesService.procesarPartidosCumplidos(
         partidoGuardado.campeonatoId,
         partidoGuardado.equipoLocalId,
         partidoGuardado.equipoVisitanteId,
         partidoGuardado.id,
+        manager,
       );
     }
 
-    return partidoGuardado;
+      return partidoGuardado;
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -485,6 +502,7 @@ export class PartidosService {
     }
 
     const partido = await this.findOne(id);
+    if (await this.tieneInformacionRelacionada(partido)) throw new BadRequestException('No se puede eliminar un partido con resultado, goles, acta o incidencias registradas.');
     partido.activo = false;
     await this.partidosRepository.save(partido);
     return { message: `Partido #${id} eliminado correctamente.` };
@@ -516,6 +534,7 @@ export class PartidosService {
         'No se encontraron partidos para la categoría y etapa indicadas.',
       );
     }
+    for (const partido of partidos) if (await this.tieneInformacionRelacionada(partido)) throw new BadRequestException('No se puede eliminar el fixture porque contiene partidos con resultado, goles, acta o incidencias.');
 
     // Soft delete de todos
     for (const p of partidos) {
@@ -527,5 +546,15 @@ export class PartidosService {
       message: `Fixture eliminado correctamente.`,
       eliminados: partidos.length,
     };
+  }
+
+  private async tieneInformacionRelacionada(partido: Partido): Promise<boolean> {
+    if (partido.estado === 'jugado' || partido.golesLocal != null || partido.golesVisitante != null) return true;
+    const [goles, actas, incidencias] = await Promise.all([
+      this.golesRepository.count({ where: { partidoId: partido.id } }),
+      this.actaRepository.count({ where: { partidoId: partido.id } }),
+      this.incidenciaRepository.count({ where: { partidoId: partido.id, activo: true } }),
+    ]);
+    return goles > 0 || actas > 0 || incidencias > 0;
   }
 }

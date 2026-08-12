@@ -19,6 +19,7 @@ import { CreateReglaSancionDto } from './dto/create-regla-sancion.dto';
 import { UpdateReglaSancionDto } from './dto/update-regla-sancion.dto';
 import { CreateSancionDto } from './dto/create-sancion.dto';
 import { UpdateSancionDto } from './dto/update-sancion.dto';
+import { AplicarReparacionSancionesDto } from './dto/aplicar-reparacion-sanciones.dto';
 import { ApelarSancionDto } from './dto/apelar-sancion.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -150,6 +151,28 @@ export class SancionesController {
       },
       req.user,
     );
+  }
+
+  @Get('reparacion/previsualizar')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  previsualizarReparacion(
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Request() req: any,
+  ) {
+    return this.sancionesService.previsualizarReparacion(campeonatoId, req.user);
+  }
+
+  @Post('reparacion/aplicar')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  aplicarReparacion(@Body() dto: AplicarReparacionSancionesDto, @Request() req: any) {
+    return this.sancionesService.aplicarReparacion(dto, req.user);
+  }
+
+  @Get(':id/historial-cumplimiento')
+  historialCumplimiento(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.sancionesService.obtenerHistorialCumplimiento(id, req.user);
   }
 
   @Get('jugador/:jugadorId/activas')

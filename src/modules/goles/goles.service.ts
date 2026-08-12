@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { Gol } from './entities/gol.entity';
 import { CreateGolDto } from './dto/create-gol.dto';
 import { Partido } from '../partidos/entities/partido.entity';
@@ -47,10 +47,11 @@ export class GolesService {
    * @param partido   - El partido al que pertenecen los goles (ya cargado)
    * @param goles     - Array de goles a registrar
    */
-  async registrarGoles(partido: Partido, goles: CreateGolDto[]): Promise<Gol[]> {
+  async registrarGoles(partido: Partido, goles: CreateGolDto[], manager?: EntityManager): Promise<Gol[]> {
+    const golesRepo = manager?.getRepository(Gol) ?? this.golesRepository;
     if (!goles || goles.length === 0) {
       // Si no se envían autores, simplemente limpiamos los previousgoles y retornamos []
-      await this.golesRepository.delete({ partidoId: partido.id });
+      await golesRepo.delete({ partidoId: partido.id });
       return [];
     }
 
@@ -80,7 +81,7 @@ export class GolesService {
     }
 
     // ── Eliminar goles previos del partido (idempotente) ─────────────────────
-    await this.golesRepository.delete({ partidoId: partido.id });
+    await golesRepo.delete({ partidoId: partido.id });
 
     // ── Crear cada gol ───────────────────────────────────────────────────────
     const nuevosGoles = goles.map((g) => {
@@ -96,7 +97,7 @@ export class GolesService {
               : partido.equipoLocalId)
           : g.equipoDelJugadorId;
 
-      return this.golesRepository.create({
+      return golesRepo.create({
         partidoId: partido.id,
         jugadorId: g.jugadorId,
         equipoId: equipoBeneficiarioId,
@@ -108,7 +109,7 @@ export class GolesService {
       });
     });
 
-    return this.golesRepository.save(nuevosGoles);
+    return golesRepo.save(nuevosGoles);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
