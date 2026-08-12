@@ -380,7 +380,7 @@ export class SancionesService {
       query.andWhere(
         '(sancion.suspension_activa = true OR ' +
         '(sancion.fecha_fin_suspension IS NOT NULL AND sancion.fecha_fin_suspension >= CURRENT_DATE) OR ' +
-        "(tipo.\"aplicaA\" = 'equipo' AND sancion.activo = true))",
+        "(tipo.\"aplicaA\" IN ('equipo', 'barra', 'directivo') AND sancion.activo = true))",
       );
     }
 
@@ -782,6 +782,40 @@ export class SancionesService {
     }
 
     await sancionRepo.save(suspensiones);
+  }
+
+  /**
+   * Un partido suspendido puede cumplir una suspensión solo si la plantilla ya
+   * quedó cerrada y el jugador consta exactamente como "suspendido".
+   */
+  async procesarPartidoSuspendido(
+    campeonatoId: number,
+    equipoLocalId: number,
+    equipoVisitanteId: number,
+    partidoId: number,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const sanciones = manager?.getRepository(Sancion) ?? this.sancionRepo;
+    const actas = manager?.getRepository(ActaAlineacion) ?? this.actaAlineacionRepo;
+    const cumplidos = manager?.getRepository(SancionPartidoCumplido) ?? this.sancionPartidoCumplidoRepo;
+    const excluidos = manager?.getRepository(SancionPartidoExcluido) ?? this.sancionPartidoExcluidoRepo;
+    const planilla = await actas.find({ where: { partidoId } });
+    if (!planilla.length) return;
+    const activas = await sanciones.find({ where: [
+      { campeonatoId, equipoId: equipoLocalId, suspensionActiva: true, activo: true },
+      { campeonatoId, equipoId: equipoVisitanteId, suspensionActiva: true, activo: true },
+    ] });
+    for (const sancion of activas) {
+      if (!sancion.jugadorId) continue;
+      const registro = planilla.find(item => item.jugadorId === sancion.jugadorId);
+      if (registro?.estado !== 'suspendido') continue;
+      if (await cumplidos.findOne({ where: { sancionId: sancion.id, partidoId } })) continue;
+      if (await excluidos.findOne({ where: { sancionId: sancion.id, partidoId } })) continue;
+      sancion.partidosCumplidos = (sancion.partidosCumplidos ?? 0) + 1;
+      if (sancion.partidosCumplidos >= sancion.partidosSuspension) sancion.suspensionActiva = false;
+      await cumplidos.save(cumplidos.create({ sancionId: sancion.id, partidoId, estadoPlanilla: 'suspendido' }));
+      await sanciones.save(sancion);
+    }
   }
 
   /** Lista correcciones potenciales sin modificar sanciones ni auditorías. */

@@ -408,8 +408,21 @@ export class PartidosService {
       }
     }
 
+    const pasaASuspendido = dto.estado === 'suspendido' && partido.estado !== 'suspendido';
     Object.assign(partido, dto);
-    return this.partidosRepository.save(partido);
+    return this.partidosRepository.manager.transaction(async (manager) => {
+      const partidoGuardado = await manager.getRepository(Partido).save(partido);
+      if (pasaASuspendido && partidoGuardado.equipoLocalId && partidoGuardado.equipoVisitanteId) {
+        await this.sancionesService.procesarPartidoSuspendido(
+          partidoGuardado.campeonatoId,
+          partidoGuardado.equipoLocalId,
+          partidoGuardado.equipoVisitanteId,
+          partidoGuardado.id,
+          manager,
+        );
+      }
+      return partidoGuardado;
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
