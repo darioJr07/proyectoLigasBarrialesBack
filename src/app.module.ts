@@ -24,6 +24,7 @@ import { TesoreriaModule } from './modules/tesoreria/tesoreria.module';
 import { GarantiasModule } from './modules/garantias/garantias.module';
 import { DerramasModule } from './modules/derramas/derramas.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { PublicoModule } from './modules/publico/publico.module';
 import { ConfiguracionSistema } from './modules/configuracion/entities/configuracion-sistema.entity';
 import { Rol } from './modules/auth/entities/rol.entity';
 import { Usuario } from './modules/auth/entities/usuario.entity';
@@ -69,6 +70,7 @@ import { Usuario } from './modules/auth/entities/usuario.entity';
     GarantiasModule,
     DerramasModule,
     DashboardModule,
+    PublicoModule,
   ],
   controllers: [HealthController],
   providers: [DatabaseSeedService],
