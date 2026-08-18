@@ -118,7 +118,6 @@ export class PublicoService {
         const fechaB = `${b.fechaPartido ?? '9999-12-31'}T${b.horaPartido ?? '23:59'}`;
         return fechaA.localeCompare(fechaB);
       })
-      .slice(0, 20)
       .map(partido => ({
         id: partido.id, jornada: partido.jornada, fechaPartido: partido.fechaPartido, horaPartido: partido.horaPartido,
         estado: partido.estado, categoriaNombre: partido.categoria?.nombre ?? '', campeonatoNombre: partido.campeonato?.nombre ?? '',
