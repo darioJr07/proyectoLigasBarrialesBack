@@ -18,6 +18,11 @@ export class PublicoController {
     return this.publicoService.listarCampeonatosEnCurso(ligaId);
   }
 
+  @Get('ligas/:ligaId/partidos-destacados')
+  listarPartidosDestacados(@Param('ligaId', ParseIntPipe) ligaId: number) {
+    return this.publicoService.listarPartidosDestacados(ligaId);
+  }
+
   @Get('campeonatos/:campeonatoId/categorias')
   listarCategorias(@Param('campeonatoId', ParseIntPipe) campeonatoId: number) {
     return this.publicoService.listarCategorias(campeonatoId);

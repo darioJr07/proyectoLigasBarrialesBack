@@ -83,6 +83,50 @@ export class PublicoService {
     }));
   }
 
+  /** Partidos públicos prioritarios: en juego, jornada actual y próximos pendientes. */
+  async listarPartidosDestacados(ligaId: number) {
+    await this.buscarLigaPublica(ligaId);
+    const partidos = await this.partidosRepository
+      .createQueryBuilder('partido')
+      .leftJoinAndSelect('partido.campeonato', 'campeonato')
+      .leftJoinAndSelect('partido.categoria', 'categoria')
+      .leftJoinAndSelect('partido.equipoLocal', 'equipoLocal')
+      .leftJoinAndSelect('partido.equipoVisitante', 'equipoVisitante')
+      .where('campeonato.liga_id = :ligaId', { ligaId })
+      .andWhere("campeonato.estado = 'en_curso'")
+      .andWhere('partido.activo = true')
+      .andWhere("partido.estado IN ('programado', 'en_juego')")
+      .getMany();
+
+    const jornadaActual = new Map<string, number>();
+    for (const partido of partidos) {
+      const clave = `${partido.campeonatoId}-${partido.categoriaId}-${partido.etapa}`;
+      const actual = jornadaActual.get(clave);
+      if (actual === undefined || partido.jornada < actual) jornadaActual.set(clave, partido.jornada);
+    }
+
+    return partidos
+      .sort((a, b) => {
+        const prioridadEstado = (partido: Partido) => partido.estado === 'en_juego' ? 0 : 1;
+        const porEstado = prioridadEstado(a) - prioridadEstado(b);
+        if (porEstado) return porEstado;
+        const claveA = `${a.campeonatoId}-${a.categoriaId}-${a.etapa}`;
+        const claveB = `${b.campeonatoId}-${b.categoriaId}-${b.etapa}`;
+        const porJornadaActual = Number(a.jornada !== jornadaActual.get(claveA)) - Number(b.jornada !== jornadaActual.get(claveB));
+        if (porJornadaActual) return porJornadaActual;
+        const fechaA = `${a.fechaPartido ?? '9999-12-31'}T${a.horaPartido ?? '23:59'}`;
+        const fechaB = `${b.fechaPartido ?? '9999-12-31'}T${b.horaPartido ?? '23:59'}`;
+        return fechaA.localeCompare(fechaB);
+      })
+      .slice(0, 20)
+      .map(partido => ({
+        id: partido.id, jornada: partido.jornada, fechaPartido: partido.fechaPartido, horaPartido: partido.horaPartido,
+        estado: partido.estado, categoriaNombre: partido.categoria?.nombre ?? '', campeonatoNombre: partido.campeonato?.nombre ?? '',
+        equipoLocal: partido.equipoLocal ? { id: partido.equipoLocal.id, nombre: partido.equipoLocal.nombre, imagen: partido.equipoLocal.imagen } : null,
+        equipoVisitante: partido.equipoVisitante ? { id: partido.equipoVisitante.id, nombre: partido.equipoVisitante.nombre, imagen: partido.equipoVisitante.imagen } : null,
+      }));
+  }
+
   async consultarPosiciones(campeonatoId: number, categoriaId: number, etapa: string) {
     await this.buscarCategoriaPublica(campeonatoId, categoriaId);
 

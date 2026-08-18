@@ -13,7 +13,7 @@ export class UpdatePartidoDto extends PartialType(CreatePartidoDto) {
    * Permite cambiar el estado manualmente si es necesario.
    * Ej: marcar como 'suspendido' o 'cancelado'.
    */
-  @IsEnum(['programado', 'jugado', 'suspendido', 'cancelado'])
+  @IsEnum(['programado', 'en_juego', 'jugado', 'suspendido', 'cancelado'])
   @IsOptional()
-  estado?: 'programado' | 'jugado' | 'suspendido' | 'cancelado';
+  estado?: 'programado' | 'en_juego' | 'jugado' | 'suspendido' | 'cancelado';
 }

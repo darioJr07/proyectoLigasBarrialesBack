@@ -40,6 +40,12 @@ export class Partido {
   @PrimaryGeneratedColumn()
   id: number;
 
+  /**
+   * Indicador calculado al consultar partidos. No se persiste como columna:
+   * solo informa si el partido cuenta con una planilla registrada.
+   */
+  plantillaGuardada?: boolean;
+
   // ─── Relaciones con entidades ya existentes ───────────────────────────────
 
   @Column({ name: 'campeonato_id', type: 'int' })
@@ -128,12 +134,13 @@ export class Partido {
   /**
    * Estado del partido:
    * - programado: está en el fixture pero no se ha jugado.
+   * - en_juego: comenzó, pero aún no tiene resultado definitivo.
    * - jugado: ya tiene resultado.
    * - suspendido: fue suspendido temporalmente.
    * - cancelado: cancelado definitivamente.
    */
   @Column({ type: 'varchar', length: 20, default: 'programado' })
-  estado: 'programado' | 'jugado' | 'suspendido' | 'cancelado';
+  estado: 'programado' | 'en_juego' | 'jugado' | 'suspendido' | 'cancelado';
 
   // ─── Resultado ────────────────────────────────────────────────────────────
 

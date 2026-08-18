@@ -281,10 +281,12 @@ export class PartidosService {
       );
     }
 
-    return query
+    const partidos = await query
       .orderBy('partido.jornada', 'ASC')
       .addOrderBy('partido.fechaPartido', 'ASC')
       .getMany();
+
+    return this.agregarEstadoPlanilla(partidos);
   }
 
   /**
@@ -322,10 +324,12 @@ export class PartidosService {
       );
     }
 
-    return query
+    const partidos = await query
       .orderBy('partido.jornada', 'ASC')
       .addOrderBy('partido.fechaPartido', 'ASC', 'NULLS LAST')
       .getMany();
+
+    return this.agregarEstadoPlanilla(partidos);
   }
 
   /**
@@ -353,10 +357,11 @@ export class PartidosService {
     jornada: number,
     etapa: string = 'primera_etapa',
   ): Promise<Partido[]> {
-    return this.partidosRepository.find({
+    const partidos = await this.partidosRepository.find({
       where: { campeonatoId, categoriaId, jornada, etapa, activo: true },
       order: { fechaPartido: 'ASC' },
     });
+    return this.agregarEstadoPlanilla(partidos);
   }
 
   /**
@@ -371,7 +376,7 @@ export class PartidosService {
     if (!partido) {
       throw new NotFoundException(`Partido #${id} no encontrado.`);
     }
-    return partido;
+    return (await this.agregarEstadoPlanilla([partido]))[0];
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -569,5 +574,27 @@ export class PartidosService {
       this.incidenciaRepository.count({ where: { partidoId: partido.id, activo: true } }),
     ]);
     return goles > 0 || actas > 0 || incidencias > 0;
+  }
+
+  /**
+   * Agrega un dato de lectura para la interfaz sin modificar el esquema de BD.
+   * Se consulta en bloque para evitar una consulta por cada partido listado.
+   */
+  private async agregarEstadoPlanilla(partidos: Partido[]): Promise<Partido[]> {
+    if (partidos.length === 0) return partidos;
+
+    const partidoIds = partidos.map((partido) => partido.id);
+    const registros = await this.actaRepository
+      .createQueryBuilder('acta')
+      .select('acta.partidoId', 'partidoId')
+      .where('acta.partidoId IN (:...partidoIds)', { partidoIds })
+      .groupBy('acta.partidoId')
+      .getRawMany<{ partidoId: string }>();
+    const idsConPlanilla = new Set(registros.map((registro) => Number(registro.partidoId)));
+
+    return partidos.map((partido) => {
+      partido.plantillaGuardada = idsConPlanilla.has(partido.id);
+      return partido;
+    });
   }
 }
