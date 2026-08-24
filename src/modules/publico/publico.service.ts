@@ -9,6 +9,7 @@ import { TablaPosicionesService } from '../tabla-posiciones/tabla-posiciones.ser
 import { Partido } from '../partidos/entities/partido.entity';
 import { GolesService } from '../goles/goles.service';
 import { Sancion } from '../sanciones/entities/sancion.entity';
+import { ReglaSancion } from '../sanciones/entities/regla-sancion.entity';
 import { Jugador } from '../jugadores/entities/jugador.entity';
 
 /**
@@ -32,6 +33,8 @@ export class PublicoService {
     private readonly partidosRepository: Repository<Partido>,
     @InjectRepository(Sancion)
     private readonly sancionesRepository: Repository<Sancion>,
+    @InjectRepository(ReglaSancion)
+    private readonly reglasSancionRepository: Repository<ReglaSancion>,
     @InjectRepository(Jugador)
     private readonly jugadoresRepository: Repository<Jugador>,
     private readonly tablaPosicionesService: TablaPosicionesService,
@@ -231,6 +234,7 @@ export class PublicoService {
     const sanciones = await this.sancionesRepository
       .createQueryBuilder('sancion')
       .leftJoinAndSelect('sancion.tipoSancion', 'tipo')
+      .leftJoinAndSelect('sancion.reglaSancion', 'regla')
       .leftJoinAndSelect('sancion.jugador', 'jugador')
       .leftJoinAndSelect('sancion.equipo', 'equipo')
       .where('sancion.campeonato_id = :campeonatoId', { campeonatoId })
@@ -244,9 +248,37 @@ export class PublicoService {
       .addOrderBy('sancion.creado_en', 'DESC')
       .getMany();
 
+    const reglasPorTipo = new Map<number, ReglaSancion>();
+    if (sanciones.length) {
+      const reglas = await this.reglasSancionRepository
+        .createQueryBuilder('regla')
+        .where('regla.liga_id = :ligaId', { ligaId: sanciones[0].ligaId })
+        .andWhere('regla.activo = true')
+        .andWhere('regla.acumulacion_activa = true')
+        .andWhere('regla.acumulacion_cantidad IS NOT NULL')
+        .andWhere('(regla.campeonato_id = :campeonatoId OR regla.campeonato_id IS NULL)', { campeonatoId })
+        .orderBy('regla.campeonato_id', 'DESC')
+        .getMany();
+      for (const regla of reglas) if (!reglasPorTipo.has(regla.tipoSancionId)) reglasPorTipo.set(regla.tipoSancionId, regla);
+    }
+
+    const totalPorEquipoTipo = new Map<string, number>();
+    for (const sancion of sanciones) {
+      if (sancion.tipoSancion?.aplicaA === 'jugador' || !sancion.equipoId) continue;
+      const clave = `${sancion.equipoId}-${sancion.tipoSancionId}`;
+      totalPorEquipoTipo.set(clave, (totalPorEquipoTipo.get(clave) ?? 0) + 1);
+    }
+
     return sanciones.map(sancion => {
       const esJugador = sancion.tipoSancion?.aplicaA === 'jugador';
       const pendientes = Math.max(0, (sancion.partidosSuspension ?? 0) - (sancion.partidosCumplidos ?? 0));
+      const regla = sancion.reglaSancion?.acumulacionActiva && sancion.reglaSancion.acumulacionCantidad
+        ? sancion.reglaSancion
+        : reglasPorTipo.get(sancion.tipoSancionId);
+      const contadorLimite = !esJugador && regla?.acumulacionCantidad ? regla.acumulacionCantidad : null;
+      const contadorActual = contadorLimite && sancion.equipoId
+        ? totalPorEquipoTipo.get(`${sancion.equipoId}-${sancion.tipoSancionId}`) ?? 0
+        : null;
       return {
         id: sancion.id,
         destino: sancion.tipoSancion?.aplicaA ?? 'equipo',
@@ -256,6 +288,8 @@ export class PublicoService {
         tipo: sancion.tipoSancion?.nombre ?? 'Sanción',
         partidosPendientes: esJugador && !sancion.fechaFinSuspension ? pendientes : null,
         fechaFinSuspension: esJugador && sancion.fechaFinSuspension ? sancion.fechaFinSuspension : null,
+        contadorActual,
+        contadorLimite,
       };
     });
   }

@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsOptional, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsOptional, ValidateNested } from 'class-validator';
 import { ActaAlineacionJugadorDto } from './acta-alineacion-jugador.dto';
 
 /**
@@ -7,6 +7,11 @@ import { ActaAlineacionJugadorDto } from './acta-alineacion-jugador.dto';
  * Se envía una sola vez con todos los jugadores de los dos equipos.
  */
 export class GuardarAlineacionDto {
+  /** Confirmación explícita requerida para corregir la plantilla de un partido jugado. */
+  @IsBoolean()
+  @IsOptional()
+  permitirCorreccion?: boolean;
+
   @IsArray()
   @IsOptional()
   @ValidateNested({ each: true })

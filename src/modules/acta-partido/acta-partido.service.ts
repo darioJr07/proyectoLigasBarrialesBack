@@ -139,6 +139,12 @@ export class ActaPartidoService {
 
     this.validarAcceso(partido, usuario);
 
+    if (partido.estado === 'jugado' && dto.permitirCorreccion !== true) {
+      throw new BadRequestException(
+        'La plantilla está cerrada porque el partido ya fue jugado. Desbloquee la corrección de forma explícita antes de guardarla.',
+      );
+    }
+
     if (!dto.jugadores || dto.jugadores.length === 0) {
       // Eliminar alineación previa solo al confirmar el guardado vacío.
       await this.actaRepo.delete({ partidoId });
@@ -324,11 +330,33 @@ export class ActaPartidoService {
       throw new ForbiddenException('Solo master, directivo_liga o tribuna_penas pueden acceder al tribunal.');
     }
 
-    return this.incidenciaRepo.find({
+    const incidencias = await this.incidenciaRepo.find({
       where: { campeonatoId, estadoResolucion: 'pendiente', activo: true },
       relations: ['jugador', 'equipo', 'partido', 'partido.equipoLocal', 'partido.equipoVisitante'],
       order: { partidoId: 'ASC', id: 'ASC' },
     });
+
+    // El dorsal procede de la inscripción activa del mismo campeonato, equipo y
+    // categoría de la incidencia; nunca del perfil general del jugador.
+    const jugadorIds = [...new Set(incidencias.map((i) => i.jugadorId).filter((id): id is number => id != null))];
+    if (jugadorIds.length === 0) return incidencias;
+
+    const inscripciones = await this.jugadorCampeonatoRepo.find({
+      where: { campeonatoId, jugadorId: In(jugadorIds), activo: true },
+      order: { fechaInscripcion: 'DESC' },
+    });
+    const numeroPorInscripcion = new Map<string, number>();
+    for (const inscripcion of inscripciones) {
+      const clave = `${inscripcion.jugadorId}-${inscripcion.equipoId}-${inscripcion.categoriaId}`;
+      if (!numeroPorInscripcion.has(clave)) numeroPorInscripcion.set(clave, inscripcion.numeroCancha);
+    }
+
+    return incidencias.map((incidencia) => ({
+      ...incidencia,
+      numeroCancha: incidencia.jugadorId && incidencia.categoriaId
+        ? numeroPorInscripcion.get(`${incidencia.jugadorId}-${incidencia.equipoId}-${incidencia.categoriaId}`) ?? null
+        : null,
+    }));
   }
 
   /**
