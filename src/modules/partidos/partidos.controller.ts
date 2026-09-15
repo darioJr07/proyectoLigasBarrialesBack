@@ -18,6 +18,8 @@ import { RegistrarResultadoDto } from './dto/registrar-resultado.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { ProgramacionSemanalService } from './programacion-semanal.service';
+import { CrearProgramacionSemanalDto } from './dto/crear-programacion-semanal.dto';
 
 /**
  * Controlador de Partidos
@@ -41,7 +43,69 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 @Controller('partidos')
 @UseGuards(JwtAuthGuard)
 export class PartidosController {
-  constructor(private readonly partidosService: PartidosService) {}
+  constructor(private readonly partidosService: PartidosService, private readonly programacionSemanalService: ProgramacionSemanalService) {}
+
+  @Post('programacion-semanal')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  crearProgramacionSemanal(@Body() dto: CrearProgramacionSemanalDto, @Request() req: any) {
+    return this.programacionSemanalService.crear(dto, req.user);
+  }
+
+  @Get('programacion-semanal/pendiente')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  programacionSemanalPendiente(
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Query('categoriaId') categoriaId: string | undefined,
+    @Query('etapa') etapa: string,
+    @Query('jornada', ParseIntPipe) jornada: number,
+    @Request() req: any,
+  ) {
+    return this.programacionSemanalService.pendiente(campeonatoId, categoriaId ? Number(categoriaId) : undefined, etapa, jornada, req.user);
+  }
+
+  @Get('programacion-semanal/:id')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  detalleProgramacionSemanal(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.programacionSemanalService.detalle(id, req.user);
+  }
+
+  @Post('programacion-semanal/:id/sacar-bolilla/:partidoId')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  sacarBolilla(@Param('id', ParseIntPipe) id: number, @Param('partidoId', ParseIntPipe) partidoId: number, @Request() req: any) {
+    return this.programacionSemanalService.sacarBolilla(id, partidoId, req.user);
+  }
+
+  @Post('programacion-semanal/:id/confirmar')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  confirmarProgramacionSemanal(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.programacionSemanalService.confirmar(id, req.user);
+  }
+
+  @Post('programacion-semanal/:id/cancelar')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  cancelarProgramacionSemanal(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.programacionSemanalService.cancelar(id, req.user);
+  }
+
+  @Post('programacion-semanal/:id/bolillas/:bolillaId/liberar')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  liberarBolillaProgramacion(@Param('id', ParseIntPipe) id: number, @Param('bolillaId', ParseIntPipe) bolillaId: number, @Request() req: any) {
+    return this.programacionSemanalService.liberarBolilla(id, bolillaId, req.user);
+  }
+
+  @Post('programacion-semanal/:id/asignar-manual')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  asignarBolillaManual(@Param('id', ParseIntPipe) id: number, @Body() body: { partidoId: number; bolillaId: number }, @Request() req: any) {
+    return this.programacionSemanalService.asignarManual(id, Number(body.partidoId), Number(body.bolillaId), req.user);
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // CREAR PARTIDO INDIVIDUAL

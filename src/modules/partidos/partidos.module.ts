@@ -8,6 +8,10 @@ import { SancionesModule } from '../sanciones/sanciones.module';
 import { Gol } from '../goles/entities/gol.entity';
 import { ActaAlineacion } from '../acta-partido/entities/acta-alineacion.entity';
 import { ActaIncidencia } from '../acta-partido/entities/acta-incidencia.entity';
+import { Campeonato } from '../campeonatos/entities/campeonato.entity';
+import { ProgramacionSemanal } from './entities/programacion-semanal.entity';
+import { ProgramacionBolilla } from './entities/programacion-bolilla.entity';
+import { ProgramacionSemanalService } from './programacion-semanal.service';
 
 /**
  * Módulo de Partidos
@@ -18,14 +22,14 @@ import { ActaIncidencia } from '../acta-partido/entities/acta-incidencia.entity'
 @Module({
   imports: [
     // Registra la entidad Partido para poder usar el repositorio en el servicio
-    TypeOrmModule.forFeature([Partido, Gol, ActaAlineacion, ActaIncidencia]),
+    TypeOrmModule.forFeature([Partido, Gol, ActaAlineacion, ActaIncidencia, Campeonato, ProgramacionSemanal, ProgramacionBolilla]),
     // GolesModule exporta GolesService, que PartidosService usa para registrar goles al guardar resultado
     GolesModule,
     // SancionesModule exporta SancionesService, que PartidosService usa para procesar partidos cumplidos
     SancionesModule,
   ],
   controllers: [PartidosController],
-  providers: [PartidosService],
+  providers: [PartidosService, ProgramacionSemanalService],
   exports: [PartidosService], // Exportamos el servicio por si otros módulos lo necesitan
 })
 export class PartidosModule {}
