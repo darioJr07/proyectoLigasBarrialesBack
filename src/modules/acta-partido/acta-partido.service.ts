@@ -407,6 +407,10 @@ export class ActaPartidoService {
       if (dto.descripcion) sancion.descripcion = dto.descripcion;
       sancion.partidosSuspension = dto.partidosSuspension ?? 0;
       sancion.partidosCumplidos = 0;
+      // Solo las incidencias colectivas pueden afectar los puntos de un equipo.
+      sancion.puntosDescuentoAplicado = incidencia.jugadorId
+        ? 0
+        : Math.max(0, Number(dto.puntosDescuentoAplicado ?? 0));
       sancion.suspensionActiva = (dto.partidosSuspension ?? 0) > 0 || !!(dto.fechaFinSuspension);
       sancion.fechaSancion = dto.fechaSancion ? new Date(dto.fechaSancion) : new Date();
       if (dto.fechaInicioSuspension) sancion.fechaInicioSuspension = new Date(dto.fechaInicioSuspension) as any;

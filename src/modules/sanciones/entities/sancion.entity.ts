@@ -141,6 +141,13 @@ export class Sancion {
   partidosCumplidos: number;
 
   /**
+   * Descuento definitivo resuelto por el Tribunal. No hereda cambios futuros
+   * de la regla y solo se usa para recalcular la tabla de posiciones.
+   */
+  @Column({ name: 'puntos_descuento_aplicado', type: 'int', default: 0 })
+  puntosDescuentoAplicado: number;
+
+  /**
    * Indica si la suspensión sigue activa.
    * Se pone en false cuando partidosCumplidos >= partidosSuspension,
    * o cuando el directivo la levanta manualmente.

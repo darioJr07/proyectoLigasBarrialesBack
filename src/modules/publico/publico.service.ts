@@ -240,9 +240,9 @@ export class PublicoService {
       .where('sancion.campeonato_id = :campeonatoId', { campeonatoId })
       .andWhere('sancion.activo = true')
       .andWhere(
-        '(sancion.suspension_activa = true OR ' +
-        '(sancion.fecha_fin_suspension IS NOT NULL AND sancion.fecha_fin_suspension >= CURRENT_DATE) OR ' +
-        "tipo.\"aplicaA\" IN ('equipo', 'barra', 'directivo'))",
+        '((sancion.fecha_fin_suspension IS NOT NULL AND sancion.fecha_fin_suspension >= CURRENT_DATE) OR ' +
+        '(sancion.fecha_fin_suspension IS NULL AND sancion.suspension_activa = true) OR ' +
+        "(tipo.\"aplicaA\" IN ('equipo', 'barra', 'directivo') AND sancion.fecha_fin_suspension IS NULL))",
       )
       .orderBy('sancion.fecha_sancion', 'DESC')
       .addOrderBy('sancion.creado_en', 'DESC')
@@ -286,8 +286,9 @@ export class PublicoService {
         jugadorImagen: esJugador ? sancion.jugador?.imagen ?? null : null,
         equipo: sancion.equipo ? { id: sancion.equipo.id, nombre: sancion.equipo.nombre, imagen: sancion.equipo.imagen } : null,
         tipo: sancion.tipoSancion?.nombre ?? 'Sanción',
+        puntosDescuentoAplicado: sancion.puntosDescuentoAplicado ?? 0,
         partidosPendientes: esJugador && !sancion.fechaFinSuspension ? pendientes : null,
-        fechaFinSuspension: esJugador && sancion.fechaFinSuspension ? sancion.fechaFinSuspension : null,
+        fechaFinSuspension: sancion.fechaFinSuspension ?? null,
         contadorActual,
         contadorLimite,
       };

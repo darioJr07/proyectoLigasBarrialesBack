@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Partido } from '../partidos/entities/partido.entity';
+import { Sancion } from '../sanciones/entities/sancion.entity';
 
 /**
  * Fila de la tabla de posiciones para un equipo.
@@ -18,6 +19,7 @@ export interface FilaPosicion {
   gc: number;   // Goles en Contra
   dg: number;   // Diferencia de Goles (gf - gc)
   puntos: number; // Puntos totales (incluye bonificaciones)
+  puntosDescuento: number; // Descuento disciplinario definitivo del Tribunal
   tieneSancion: boolean; // true si el equipo fue sancionado al menos 1 vez en la etapa
 }
 
@@ -26,6 +28,8 @@ export class TablaPosicionesService {
   constructor(
     @InjectRepository(Partido)
     private readonly partidosRepository: Repository<Partido>,
+    @InjectRepository(Sancion)
+    private readonly sancionesRepository: Repository<Sancion>,
   ) {}
 
   /**
@@ -56,6 +60,26 @@ export class TablaPosicionesService {
       relations: ['equipoLocal', 'equipoVisitante'],
     });
 
+    // Los descuentos disciplinarios se aplican a la etapa del partido donde
+    // nació la incidencia; anular la sanción los excluye automáticamente.
+    const sancionesConDescuento = await this.sancionesRepository
+      .createQueryBuilder('sancion')
+      .innerJoin('sancion.partido', 'partido')
+      .where('sancion.campeonato_id = :campeonatoId', { campeonatoId })
+      .andWhere('sancion.categoria_id = :categoriaId', { categoriaId })
+      .andWhere('sancion.activo = true')
+      .andWhere('sancion.puntos_descuento_aplicado > 0')
+      .andWhere('partido.etapa = :etapa', { etapa })
+      .getMany();
+    const descuentosPorEquipo = new Map<number, number>();
+    for (const sancion of sancionesConDescuento) {
+      if (!sancion.equipoId) continue;
+      descuentosPorEquipo.set(
+        sancion.equipoId,
+        (descuentosPorEquipo.get(sancion.equipoId) ?? 0) + sancion.puntosDescuentoAplicado,
+      );
+    }
+
     // Mapa equipoId → fila de estadísticas
     const mapa = new Map<number, Omit<FilaPosicion, 'posicion' | 'dg'>>();
     // Set de equipos sancionados en esta etapa
@@ -70,6 +94,7 @@ export class TablaPosicionesService {
           pj: 0, pg: 0, pe: 0, pp: 0,
           gf: 0, gc: 0,
           puntos: 0,
+          puntosDescuento: 0,
           tieneSancion: false,
         });
       }
@@ -129,6 +154,14 @@ export class TablaPosicionesService {
       // ── Bonificaciones se suman encima del resultado ──
       local.puntos += bonusL;
       visitante.puntos += bonusV;
+    }
+
+    for (const [equipoId, descuento] of descuentosPorEquipo) {
+      const fila = mapa.get(equipoId);
+      if (!fila) continue;
+      fila.puntos -= descuento;
+      fila.puntosDescuento = descuento;
+      fila.tieneSancion = true;
     }
 
     // Calcular diferencia de goles y ordenar

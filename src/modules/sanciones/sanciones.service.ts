@@ -220,8 +220,9 @@ export class SancionesService {
     });
 
     // Si viene reglaSancionId y no se indicaron partidos manualmente, tomarlos de la regla
+    let reglaRef: ReglaSancion | null = null;
     if (dto.reglaSancionId && !dto.partidosSuspension) {
-      const reglaRef = await this.reglaSancionRepo.findOne({ where: { id: dto.reglaSancionId } });
+      reglaRef = await this.reglaSancionRepo.findOne({ where: { id: dto.reglaSancionId } });
       if (reglaRef) {
         if (reglaRef.modoCastigo === 'tiempo' && reglaRef.duracionMeses) {
           // Suspensión por tiempo: calcular fechaFin a partir de fechaInicio
@@ -247,9 +248,12 @@ export class SancionesService {
     const tipoRef = await this.tipoSancionRepo.findOne({ where: { id: dto.tipoSancionId } });
     if (tipoRef && tipoRef.aplicaA !== 'jugador') {
       sancion.partidosSuspension    = 0;
-      sancion.suspensionActiva      = false;
-      sancion.fechaInicioSuspension = null;
-      sancion.fechaFinSuspension    = null;
+      const esSancionTemporal = reglaRef?.modoCastigo === 'tiempo' && !!reglaRef.duracionMeses && !!sancion.fechaFinSuspension;
+      if (!esSancionTemporal) {
+        sancion.suspensionActiva      = false;
+        sancion.fechaInicioSuspension = null;
+        sancion.fechaFinSuspension    = null;
+      }
     }
 
     const sancionGuardada = await this.sancionRepo.save(sancion) as Sancion;
@@ -378,9 +382,9 @@ export class SancionesService {
     }
     if (filtros.soloActivas) {
       query.andWhere(
-        '(sancion.suspension_activa = true OR ' +
-        '(sancion.fecha_fin_suspension IS NOT NULL AND sancion.fecha_fin_suspension >= CURRENT_DATE) OR ' +
-        "(tipo.\"aplicaA\" IN ('equipo', 'barra', 'directivo') AND sancion.activo = true))",
+        '((sancion.fecha_fin_suspension IS NOT NULL AND sancion.fecha_fin_suspension >= CURRENT_DATE) OR ' +
+        '(sancion.fecha_fin_suspension IS NULL AND sancion.suspension_activa = true) OR ' +
+        "(tipo.\"aplicaA\" IN ('equipo', 'barra', 'directivo') AND sancion.fecha_fin_suspension IS NULL AND sancion.activo = true))",
       );
     }
 

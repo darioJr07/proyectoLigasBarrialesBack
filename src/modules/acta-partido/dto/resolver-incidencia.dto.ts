@@ -71,4 +71,10 @@ export class ResolverIncidenciaDto {
    */
   @IsOptional()
   montoMulta?: number;
+
+  /** Descuento definitivo de puntos decidido por el Tribunal para el equipo. */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  puntosDescuentoAplicado?: number;
 }
