@@ -73,10 +73,24 @@ export class ProgramacionSemanalService {
     if (!sesion) throw new NotFoundException('Sesión de programación no encontrada.');
     this.validarLiga(sesion.ligaId, usuario);
     const bolillas = await this.bolillas.find({ where: { programacionId: id }, order: { numero: 'ASC' } });
+    // La sesión puede haberse iniciado antes de que un partido se registre como
+    // jugado (por ejemplo, por resultado administrativo). Solo los que siguen
+    // programados y sin horario deben participar o bloquear la confirmación.
     const partidos = await this.partidos.find({ where: { campeonatoId: sesion.campeonatoId, etapa: sesion.etapa, jornada: sesion.jornada, activo: true } });
-    const incluidos = partidos.filter(p => !sesion.categoriaId || p.categoriaId === sesion.categoriaId);
+    const incluidos = partidos.filter(p =>
+      (!sesion.categoriaId || p.categoriaId === sesion.categoriaId)
+      && p.estado === 'programado'
+      && (!p.fechaPartido || !p.horaPartido),
+    );
     const porId = new Map(incluidos.map(p => [p.id, p]));
-    return { ...sesion, bolillas: bolillas.map(b => ({ ...b, partido: b.partidoId ? porId.get(b.partidoId) ?? null : null })), partidos: incluidos };
+    return {
+      ...sesion,
+      // Es un total operativo de la sesión recuperada; al confirmar también
+      // se persiste para que el historial no conserve el total obsoleto.
+      totalPartidos: incluidos.length,
+      bolillas: bolillas.map(b => ({ ...b, partido: b.partidoId ? porId.get(b.partidoId) ?? null : null })),
+      partidos: incluidos,
+    };
   }
 
   async sacarBolilla(id: number, partidoId: number, usuario: any) {
@@ -97,8 +111,16 @@ export class ProgramacionSemanalService {
   async confirmar(id: number, usuario: any) {
     const detalle = await this.detalle(id, usuario);
     if (detalle.estado !== 'en_sorteo') throw new BadRequestException('La sesión no se puede confirmar.');
-    const asignadas = detalle.bolillas.filter((b: ProgramacionBolilla) => b.estado === 'asignada' && !!b.partidoId);
-    if (asignadas.length !== detalle.totalPartidos) throw new BadRequestException(`Faltan ${detalle.totalPartidos - asignadas.length} partidos por sortear.`);
+    const partidosProgramables = detalle.partidos as Partido[];
+    const idsProgramables = new Set(partidosProgramables.map(partido => partido.id));
+    const asignadas = detalle.bolillas.filter((bolilla: ProgramacionBolilla) =>
+      bolilla.estado === 'asignada'
+      && !!bolilla.partidoId
+      && idsProgramables.has(bolilla.partidoId),
+    );
+    if (asignadas.length !== partidosProgramables.length) {
+      throw new BadRequestException(`Faltan ${partidosProgramables.length - asignadas.length} partidos por sortear.`);
+    }
 
     await this.dataSource.transaction(async manager => {
       for (const bolilla of asignadas) {
@@ -109,7 +131,23 @@ export class ProgramacionSemanalService {
         partido.cancha = partido.cancha || bolilla.cancha;
         await manager.save(partido);
       }
-      await manager.update(ProgramacionSemanal, id, { estado: 'confirmada', confirmadoEn: new Date() });
+      // Toda bolilla que no se usó para un partido todavía programable queda
+      // cerrada como no utilizada; no debe aparentar estar disponible después
+      // de confirmar una sesión que cambió durante el sorteo.
+      for (const bolilla of detalle.bolillas as ProgramacionBolilla[]) {
+        if (asignadas.some(asignada => asignada.id === bolilla.id)) continue;
+        if (bolilla.estado === 'no_utilizada') continue;
+        bolilla.partidoId = null;
+        bolilla.estado = 'no_utilizada';
+        bolilla.ordenSorteo = null;
+        bolilla.asignacionManual = false;
+        await manager.save(ProgramacionBolilla, bolilla);
+      }
+      await manager.update(ProgramacionSemanal, id, {
+        estado: 'confirmada',
+        confirmadoEn: new Date(),
+        totalPartidos: partidosProgramables.length,
+      });
     });
     return this.detalle(id, usuario);
   }

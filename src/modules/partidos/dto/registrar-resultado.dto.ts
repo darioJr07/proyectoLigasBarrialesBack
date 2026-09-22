@@ -9,6 +9,7 @@ import {
   IsNotEmpty,
   IsIn,
   IsArray,
+  IsBoolean,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -71,6 +72,14 @@ export class RegistrarResultadoDto {
   @IsIn(['ninguno', 'local', 'visitante'])
   @IsOptional()
   sancionado?: 'ninguno' | 'local' | 'visitante';
+
+  /**
+   * Se usa únicamente cuando el resultado administrativo corresponde a un
+   * equipo expulsado. El rival sí cumple suspensiones por partido.
+   */
+  @IsBoolean()
+  @IsOptional()
+  resultadoAdministrativoPorExpulsion?: boolean;
 
   /**
    * Autores de los goles del partido (opcional).

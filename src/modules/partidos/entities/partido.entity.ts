@@ -181,6 +181,14 @@ export class Partido {
   sancionado: 'ninguno' | 'local' | 'visitante';
 
   /**
+   * Identifica un resultado administrativo ocasionado por la expulsión del
+   * equipo local o visitante. En este caso solo los jugadores sancionados del
+   * rival pueden cumplir una fecha; el equipo expulsado no participa.
+   */
+  @Column({ name: 'resultado_administrativo_por_expulsion', type: 'boolean', default: false })
+  resultadoAdministrativoPorExpulsion: boolean;
+
+  /**
    * Observaciones o notas del partido. Ej: "partido suspendido por lluvia".
    */
   @Column({ type: 'varchar', length: 500, nullable: true })

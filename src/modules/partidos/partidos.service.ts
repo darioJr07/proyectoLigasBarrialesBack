@@ -468,11 +468,19 @@ export class PartidosService {
     // para evitar que una sanción de 3 partidos se descuente 2 veces con 1 partido real.
     const eraJugado = partido.estado === 'jugado';
 
+    const resultadoPorExpulsion = dto.resultadoAdministrativoPorExpulsion ?? false;
+    if (resultadoPorExpulsion && !['local', 'visitante'].includes(dto.sancionado ?? 'ninguno')) {
+      throw new BadRequestException(
+        'Para registrar un resultado por equipo expulsado debe indicar si el sancionado es local o visitante.',
+      );
+    }
+
     partido.golesLocal = dto.golesLocal;
     partido.golesVisitante = dto.golesVisitante;
     partido.bonificacionLocal = dto.bonificacionLocal ?? 0;
     partido.bonificacionVisitante = dto.bonificacionVisitante ?? 0;
     partido.sancionado = dto.sancionado ?? 'ninguno';
+    partido.resultadoAdministrativoPorExpulsion = resultadoPorExpulsion;
     partido.estado = 'jugado';
     if (dto.observaciones) partido.observaciones = dto.observaciones;
 
@@ -486,18 +494,38 @@ export class PartidosService {
       await this.golesService.registrarGoles(partidoGuardado, dto.autoresGoles, manager);
     }
 
-    // Procesar partidos cumplidos para suspensiones activas de ambos equipos.
-    // SOLO se ejecuta la primera vez (cuando el partido pasa a 'jugado').
-    // Si ya era 'jugado' (edición del resultado), no se vuelve a contar
-    // para evitar doble descuento en sanciones.
     if (partidoGuardado.equipoLocalId && partidoGuardado.equipoVisitanteId) {
-      await this.sancionesService.procesarPartidosCumplidos(
-        partidoGuardado.campeonatoId,
-        partidoGuardado.equipoLocalId,
-        partidoGuardado.equipoVisitanteId,
-        partidoGuardado.id,
-        manager,
-      );
+      if (partidoGuardado.resultadoAdministrativoPorExpulsion) {
+        const equipoExpulsadoId = partidoGuardado.sancionado === 'local'
+          ? partidoGuardado.equipoLocalId
+          : partidoGuardado.equipoVisitanteId;
+        const equipoRivalId = partidoGuardado.sancionado === 'local'
+          ? partidoGuardado.equipoVisitanteId
+          : partidoGuardado.equipoLocalId;
+
+        // Si se corrige un resultado ya guardado, se elimina cualquier
+        // cumplimiento previo del equipo expulsado antes de contar al rival.
+        await this.sancionesService.revertirCumplimientosEquipoExpulsado(
+          partidoGuardado.campeonatoId,
+          equipoExpulsadoId,
+          partidoGuardado.id,
+          manager,
+        );
+        await this.sancionesService.procesarResultadoEquipoExpulsado(
+          partidoGuardado.campeonatoId,
+          equipoRivalId,
+          partidoGuardado.id,
+          manager,
+        );
+      } else {
+        await this.sancionesService.procesarPartidosCumplidos(
+          partidoGuardado.campeonatoId,
+          partidoGuardado.equipoLocalId,
+          partidoGuardado.equipoVisitanteId,
+          partidoGuardado.id,
+          manager,
+        );
+      }
     }
 
       return partidoGuardado;

@@ -789,6 +789,82 @@ export class SancionesService {
   }
 
   /**
+   * Un equipo expulsado no disputó el encuentro. El fixture sí es válido para
+   * que el rival cumpla sus suspensiones por partidos, sin crear planillas
+   * ficticias ni afectar sanciones por tiempo o colectivas.
+   */
+  async procesarResultadoEquipoExpulsado(
+    campeonatoId: number,
+    equipoRivalId: number,
+    partidoId: number,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const sancionRepo = manager?.getRepository(Sancion) ?? this.sancionRepo;
+    const cumplidoRepo = manager?.getRepository(SancionPartidoCumplido) ?? this.sancionPartidoCumplidoRepo;
+    const excluidoRepo = manager?.getRepository(SancionPartidoExcluido) ?? this.sancionPartidoExcluidoRepo;
+    const suspensiones = await sancionRepo.find({
+      where: { campeonatoId, equipoId: equipoRivalId, suspensionActiva: true, activo: true },
+    });
+
+    for (const sancion of suspensiones) {
+      // Solo suspensión individual por número de partidos. Las sanciones por
+      // tiempo y las colectivas no se ven alteradas por este resultado.
+      if (!sancion.jugadorId || !sancion.partidosSuspension || sancion.fechaFinSuspension) continue;
+      if (await cumplidoRepo.findOne({ where: { sancionId: sancion.id, partidoId } })) continue;
+      if (await excluidoRepo.findOne({ where: { sancionId: sancion.id, partidoId } })) continue;
+
+      sancion.partidosCumplidos = (sancion.partidosCumplidos ?? 0) + 1;
+      if (sancion.partidosCumplidos >= sancion.partidosSuspension) {
+        sancion.suspensionActiva = false;
+      }
+      await cumplidoRepo.save(cumplidoRepo.create({
+        sancionId: sancion.id,
+        partidoId,
+        estadoPlanilla: 'equipo_expelido',
+      }));
+    }
+
+    if (suspensiones.length) await sancionRepo.save(suspensiones);
+  }
+
+  /**
+   * Al corregir un partido como resultado por equipo expulsado, deshace los
+   * cumplimientos que se hubiesen registrado antes para ese equipo. Solo toca
+   * suspensiones individuales por partidos, nunca las temporales/colectivas.
+   */
+  async revertirCumplimientosEquipoExpulsado(
+    campeonatoId: number,
+    equipoExpulsadoId: number,
+    partidoId: number,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const sancionRepo = manager?.getRepository(Sancion) ?? this.sancionRepo;
+    const cumplidoRepo = manager?.getRepository(SancionPartidoCumplido) ?? this.sancionPartidoCumplidoRepo;
+    const registros = await cumplidoRepo
+      .createQueryBuilder('cumplido')
+      .innerJoinAndSelect('cumplido.sancion', 'sancion')
+      .where('cumplido.partido_id = :partidoId', { partidoId })
+      .andWhere('sancion.campeonato_id = :campeonatoId', { campeonatoId })
+      .andWhere('sancion.equipo_id = :equipoExpulsadoId', { equipoExpulsadoId })
+      .andWhere('sancion.jugador_id IS NOT NULL')
+      .andWhere('sancion.partidos_suspension > 0')
+      .andWhere('sancion.fecha_fin_suspension IS NULL')
+      .getMany();
+
+    for (const registro of registros) {
+      const sancion = registro.sancion;
+      const cumplidosAntes = sancion.partidosCumplidos ?? 0;
+      sancion.partidosCumplidos = Math.max(0, cumplidosAntes - 1);
+      if (cumplidosAntes >= sancion.partidosSuspension && sancion.partidosCumplidos < sancion.partidosSuspension) {
+        sancion.suspensionActiva = true;
+      }
+      await sancionRepo.save(sancion);
+    }
+
+    if (registros.length) await cumplidoRepo.remove(registros);
+  }
+
+  /**
    * Un partido suspendido puede cumplir una suspensión solo si la plantilla ya
    * quedó cerrada y el jugador consta exactamente como "suspendido".
    */
