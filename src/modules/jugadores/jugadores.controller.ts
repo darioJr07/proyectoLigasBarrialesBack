@@ -8,18 +8,22 @@ import {
   Delete,
   UseGuards,
   Request,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { JugadoresService } from './jugadores.service';
 import { CreateJugadorDto } from './dto/create-jugador.dto';
 import { UpdateJugadorDto } from './dto/update-jugador.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 
 /**
  * Controlador de jugadores
  * Maneja endpoints REST para gestión de jugadores
  */
 @Controller('jugadores')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('master', 'directivo_liga', 'dirigente_equipo')
 export class JugadoresController {
   constructor(private readonly jugadoresService: JugadoresService) {}
 
@@ -30,6 +34,7 @@ export class JugadoresController {
       req.user.userId,
       req.user.role,
       req.user.ligaId,
+      req.user.equipoId,
     );
   }
 
@@ -39,18 +44,21 @@ export class JugadoresController {
   }
 
   @Get('equipo/:equipoId')
-  findByEquipo(@Param('equipoId') equipoId: string) {
-    return this.jugadoresService.findByEquipo(+equipoId);
+  findByEquipo(
+    @Param('equipoId', ParseIntPipe) equipoId: number,
+    @Request() req: any,
+  ) {
+    return this.jugadoresService.findByEquipo(equipoId, req.user);
   }
 
   @Get('libres')
-  findLibres() {
-    return this.jugadoresService.findLibres();
+  findLibres(@Request() req: any) {
+    return this.jugadoresService.findLibres(req.user);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.jugadoresService.findOne(+id);
+  findOne(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.jugadoresService.findOne(id, req.user);
   }
 
   @Patch(':id')
@@ -65,6 +73,7 @@ export class JugadoresController {
       req.user.userId,
       req.user.role,
       req.user.ligaId,
+      req.user.equipoId,
     );
   }
 

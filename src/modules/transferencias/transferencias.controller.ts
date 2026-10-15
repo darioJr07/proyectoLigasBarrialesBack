@@ -61,8 +61,11 @@ export class TransferenciasController {
 
   @Get('jugador/:jugadorId')
   @Roles('master', 'directivo_liga', 'dirigente_equipo')
-  findByJugador(@Param('jugadorId', ParseIntPipe) jugadorId: number) {
-    return this.transferenciasService.findByJugador(jugadorId);
+  findByJugador(
+    @Param('jugadorId', ParseIntPipe) jugadorId: number,
+    @Request() req: any,
+  ) {
+    return this.transferenciasService.findByJugador(jugadorId, req.user);
   }
 
   @Patch(':id/aprobar-equipo-origen')

@@ -2,7 +2,7 @@
 
 API REST construida con NestJS, TypeScript, PostgreSQL y TypeORM.
 
-**Estado de documentacion:** actualizado el 30/07/2026.  
+**Estado de documentacion:** actualizado el 15/10/2026.
 Para el estado funcional completo del sistema, revisar [../ESTADO_ACTUAL_PROYECTO.md](../ESTADO_ACTUAL_PROYECTO.md).
 
 ## Tecnologias
@@ -34,7 +34,8 @@ Para el estado funcional completo del sistema, revisar [../ESTADO_ACTUAL_PROYECT
 - `goles`: registro de goles.
 - `acta-partido`: acta, alineacion, informe e incidencias.
 - `sanciones`: reglas, sanciones, apelaciones y arrastres.
-- `tesoreria`: cobros, movimientos, libro de caja y configuracion vocalia.
+- `tesoreria`: cobros, movimientos, cuenta consolidada, libro de caja, configuración de vocalía, inicio operativo, conciliaciones y cierre definitivo por campeonato.
+- `recibos-tesoreria`: emisión, consulta y reimpresión de recibos persistentes numerados por liga y año.
 - `garantias`: garantias y prestamos del fondo.
 - `derramas`: derramas colectivas y deudas.
 - `configuracion`: configuraciones del sistema.
@@ -108,7 +109,27 @@ npm run test:cov
 
 ## Testing
 
-Los comandos de test existen, pero la documentacion vigente marca como pendiente una estrategia completa de tests automatizados unitarios, integracion y E2E.
+Existe una primera cobertura automatizada para los flujos críticos de jugadores, habilitaciones y transferencias:
+
+- `jugadores.service.spec.ts`: alcance de Master, directivo y dirigente.
+- `jugador-campeonatos.service.spec.ts`: acceso por campeonato, reutilización de rechazos y revalidación de cupo.
+- `transferencias.service.spec.ts`: bloqueo de solicitudes simultáneas, historial de rechazos y conclusión transaccional.
+- Resultado del 15/10/2026: 3 suites y 12 pruebas aprobadas.
+- Las pruebas usan mocks; no acceden a la base de datos y `tsconfig.build.json` excluye `**/*spec.ts` del build productivo.
+
+Ejecución enfocada:
+
+```bash
+npm test -- --runInBand jugadores.service.spec.ts jugador-campeonatos.service.spec.ts transferencias.service.spec.ts
+```
+
+La cobertura integral y E2E continúa como mejora futura.
+
+## Auditoría de integridad
+
+El archivo `audits/jugadores-habilitaciones-transferencias.sql` contiene únicamente consultas `SELECT` para detectar duplicidad de habilitaciones activas, dorsales repetidos, transferencias simultáneas e inconsistencias de equipo. La ejecución del 15/10/2026 no detectó novedades.
+
+Se mantiene `DB_SYNCHRONIZE=true` por decisión operativa. No se agregó una migración de índices para estos flujos; esa protección queda aplazada hasta adoptar una estrategia formal de migraciones.
 
 ## Documentacion Relacionada
 
@@ -118,4 +139,3 @@ Los comandos de test existen, pero la documentacion vigente marca como pendiente
 - [Modulo de Tesoreria](../MODULO_TESORERIA_RESUMEN.md)
 - [Upload de imagenes](../UPLOAD_SYSTEM.md)
 - [Cloudinary](../CONFIGURACION_CLOUDINARY.md)
-

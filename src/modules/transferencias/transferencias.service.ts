@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
 import { Transferencia } from './entities/transferencia.entity';
 import { CreateTransferenciaDto } from './dto/create-transferencia.dto';
 import { AprobarTransferenciaDto } from './dto/aprobar-transferencia.dto';
@@ -26,7 +26,37 @@ export class TransferenciasService {
     private jugadorCampeonatoRepo: Repository<JugadorCampeonato>,
     @InjectRepository(Inscripcion)
     private inscripcionRepo: Repository<Inscripcion>,
+    private dataSource: DataSource,
   ) {}
+
+  private async assertCampeonatoAccess(campeonato: Campeonato, usuario: any): Promise<void> {
+    if (usuario.role === 'master') return;
+
+    if (usuario.role === 'directivo_liga') {
+      if (!usuario.ligaId || campeonato.ligaId !== usuario.ligaId) {
+        throw new ForbiddenException('No tienes permisos para acceder a este campeonato');
+      }
+      return;
+    }
+
+    if (usuario.role === 'dirigente_equipo') {
+      if (!usuario.equipoId) throw new ForbiddenException('No tienes un equipo asignado');
+      const equipo = await this.equipoRepo.findOne({ where: { id: usuario.equipoId } });
+      if (!equipo || equipo.ligaId !== campeonato.ligaId) {
+        throw new ForbiddenException('No tienes permisos para acceder a este campeonato');
+      }
+      return;
+    }
+
+    throw new ForbiddenException('No tienes permisos para acceder a transferencias');
+  }
+
+  private async getCampeonatoAutorizado(campeonatoId: number, usuario: any): Promise<Campeonato> {
+    const campeonato = await this.campeonatoRepo.findOne({ where: { id: campeonatoId } });
+    if (!campeonato) throw new NotFoundException('Campeonato no encontrado');
+    await this.assertCampeonatoAccess(campeonato, usuario);
+    return campeonato;
+  }
 
   /**
    * Helper para serializar transferencias con campos virtuales del jugador
@@ -92,6 +122,17 @@ export class TransferenciasService {
     // 5. Validar que ambos equipos pertenecen a la misma liga
     if (equipoOrigen.ligaId !== equipoDestino.ligaId) {
       throw new BadRequestException('Los equipos deben pertenecer a la misma liga');
+    }
+
+    if (equipoOrigen.id === equipoDestino.id) {
+      throw new BadRequestException('El equipo origen y el equipo destino deben ser diferentes');
+    }
+
+    if (
+      equipoOrigen.ligaId !== campeonato.ligaId ||
+      equipoDestino.ligaId !== campeonato.ligaId
+    ) {
+      throw new BadRequestException('Los equipos deben pertenecer a la liga del campeonato');
     }
 
     // 6. Validar que el equipo destino está inscrito en el campeonato
@@ -214,7 +255,32 @@ export class TransferenciasService {
       transferencia.observaciones = dto.observaciones;
     }
 
-    const result = await this.transferenciaRepo.save(transferencia);
+    const result = await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(Transferencia);
+      const actual = await repo.findOne({
+        where: { id, activo: true },
+        lock: { mode: 'pessimistic_write' },
+        loadEagerRelations: false,
+      });
+      if (!actual) throw new NotFoundException('Transferencia no encontrada');
+      if (actual.estadoEquipoOrigen !== 'pendiente') {
+        throw new BadRequestException('Esta transferencia ya fue procesada por el equipo origen');
+      }
+      if (usuario.role === 'dirigente_equipo' && usuario.equipoId !== actual.equipoOrigenId) {
+        throw new ForbiddenException('Solo el dirigente del equipo origen puede aprobar esta transferencia');
+      }
+
+      actual.estadoEquipoOrigen = 'aprobado';
+      actual.aprobadoPorOrigen = usuario.userId;
+      actual.fechaAprobacionOrigen = new Date();
+      if (dto.observaciones) actual.observaciones = dto.observaciones;
+
+      const saved = await repo.save(actual);
+      if (saved.estadoDirectivo === 'aprobado') {
+        await this.completarTransferenciaAtomica(saved, manager);
+      }
+      return saved;
+    });
 
     console.log(`[aprobarPorEquipoOrigen] Transferencia ${result.id} aprobada por equipo origen`);
     console.log(`[aprobarPorEquipoOrigen] Estado directivo: ${result.estadoDirectivo}`);
@@ -222,7 +288,7 @@ export class TransferenciasService {
     // Si también fue aprobado por directivo, completar transferencia
     if (result.estadoDirectivo === 'aprobado') {
       console.log(`[aprobarPorEquipoOrigen] Ambas aprobaciones completas. Llamando a completarTransferencia...`);
-      await this.completarTransferencia(result);
+      // El cambio de equipo ya se realizo dentro de la misma transaccion.
     }
 
     // Cargar relaciones para serialización
@@ -298,14 +364,30 @@ export class TransferenciasService {
       throw new BadRequestException('Esta transferencia ya fue procesada por el directivo');
     }
 
-    transferencia.estadoDirectivo = 'aprobado';
-    transferencia.aprobadoPorDirectivo = usuario.userId;
-    transferencia.fechaAprobacionDirectivo = new Date();
-    if (dto.observaciones) {
-      transferencia.observaciones = (transferencia.observaciones || '') + ' ' + dto.observaciones;
-    }
+    const result = await this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(Transferencia);
+      const actual = await repo.findOne({
+        where: { id, activo: true },
+        lock: { mode: 'pessimistic_write' },
+        loadEagerRelations: false,
+      });
+      if (!actual) throw new NotFoundException('Transferencia no encontrada');
+      if (actual.estadoDirectivo !== 'pendiente') {
+        throw new BadRequestException('Esta transferencia ya fue procesada por el directivo');
+      }
+      actual.estadoDirectivo = 'aprobado';
+      actual.aprobadoPorDirectivo = usuario.userId;
+      actual.fechaAprobacionDirectivo = new Date();
+      if (dto.observaciones) {
+        actual.observaciones = `${actual.observaciones || ''} ${dto.observaciones}`.trim();
+      }
 
-    const result = await this.transferenciaRepo.save(transferencia);
+      const saved = await repo.save(actual);
+      if (saved.estadoEquipoOrigen === 'aprobado') {
+        await this.completarTransferenciaAtomica(saved, manager);
+      }
+      return saved;
+    });
 
     console.log(`[aprobarPorDirectivo] Transferencia ${result.id} aprobada por directivo`);
     console.log(`[aprobarPorDirectivo] Estado equipo origen: ${result.estadoEquipoOrigen}`);
@@ -313,7 +395,7 @@ export class TransferenciasService {
     // Si también fue aprobado por equipo origen, completar transferencia
     if (result.estadoEquipoOrigen === 'aprobado') {
       console.log(`[aprobarPorDirectivo] Ambas aprobaciones completas. Llamando a completarTransferencia...`);
-      await this.completarTransferencia(result);
+      // El cambio de equipo ya se realizo dentro de la misma transaccion.
     }
 
     // Cargar relaciones para serialización
@@ -369,6 +451,58 @@ export class TransferenciasService {
     return this.serializeTransferencia(loaded);
   }
 
+  private async completarTransferenciaAtomica(
+    transferencia: Transferencia,
+    manager: EntityManager,
+  ): Promise<void> {
+    const jugadorRepo = manager.getRepository(Jugador);
+    const inscripcionRepo = manager.getRepository(Inscripcion);
+    const habilitacionRepo = manager.getRepository(JugadorCampeonato);
+
+    const jugador = await jugadorRepo.findOne({
+      where: { id: transferencia.jugadorId, activo: true },
+      lock: { mode: 'pessimistic_write' },
+      loadEagerRelations: false,
+    });
+    if (!jugador) {
+      throw new NotFoundException('Jugador no encontrado al completar la transferencia');
+    }
+    if (jugador.equipoId !== transferencia.equipoOrigenId) {
+      throw new BadRequestException(
+        'El jugador ya no pertenece al equipo origen; la transferencia no puede completarse',
+      );
+    }
+
+    const inscripcionDestino = await inscripcionRepo.findOne({
+      where: {
+        campeonatoId: transferencia.campeonatoId,
+        equipoId: transferencia.equipoDestinoId,
+        activo: true,
+        estado: 'confirmada',
+      },
+    });
+    if (!inscripcionDestino) {
+      throw new BadRequestException('El equipo destino ya no esta inscrito en el campeonato');
+    }
+
+    jugador.equipoId = transferencia.equipoDestinoId;
+    await jugadorRepo.save(jugador);
+
+    await habilitacionRepo.update(
+      {
+        jugadorId: transferencia.jugadorId,
+        campeonatoId: transferencia.campeonatoId,
+        equipoId: transferencia.equipoOrigenId,
+        activo: true,
+      },
+      {
+        activo: false,
+        estado: 'baja',
+        observaciones: 'Baja automatica por transferencia aprobada',
+      },
+    );
+  }
+
   private async completarTransferencia(transferencia: Transferencia): Promise<void> {
     console.log(`\n========== COMPLETANDO TRANSFERENCIA ==========`);
     console.log(`Transferencia ID: ${transferencia.id}`);
@@ -421,9 +555,11 @@ export class TransferenciasService {
     const whereCondition: any = { activo: true };
 
     // Filtrar según rol
-    if (usuario.role === 'directivo_liga' && usuario.ligaId) {
+    if (usuario.role === 'directivo_liga') {
+      if (!usuario.ligaId) return [];
       whereCondition.campeonato = { ligaId: usuario.ligaId };
-    } else if (usuario.role === 'dirigente_equipo' && usuario.equipoId) {
+    } else if (usuario.role === 'dirigente_equipo') {
+      if (!usuario.equipoId) return [];
       // Ver transferencias donde es origen o destino
       const transferencias = await this.transferenciaRepo.find({
         where: [
@@ -514,7 +650,8 @@ export class TransferenciasService {
       activo: true,
     };
 
-    if (usuario.role === 'directivo_liga' && usuario.ligaId) {
+    if (usuario.role === 'directivo_liga') {
+      if (!usuario.ligaId) return [];
       whereCondition.campeonato = { ligaId: usuario.ligaId };
     }
 
@@ -527,6 +664,7 @@ export class TransferenciasService {
   }
 
   async findByCampeonato(campeonatoId: number, usuario: any): Promise<any[]> {
+    await this.getCampeonatoAutorizado(campeonatoId, usuario);
     const whereCondition: any = { campeonatoId, activo: true };
 
     // Filtrar según rol
@@ -548,24 +686,34 @@ export class TransferenciasService {
       order: { fechaSolicitud: 'DESC' },
     });
 
-    // Validar acceso para directivo_liga
-    if (usuario.role === 'directivo_liga' && transferencias.length > 0) {
-      const campeonato = transferencias[0].campeonato;
-      if (campeonato.ligaId !== usuario.ligaId) {
-        throw new ForbiddenException('No tienes permisos para ver transferencias de esta liga');
-      }
-    }
-
     return this.serializeTransferencias(transferencias);
   }
 
-  async findByJugador(jugadorId: number): Promise<any[]> {
+  async findByJugador(jugadorId: number, usuario: any): Promise<any[]> {
     const transferencias = await this.transferenciaRepo.find({
       where: { jugadorId, activo: true },
       relations: ['jugador', 'campeonato', 'equipoOrigen', 'equipoDestino'],
       order: { fechaSolicitud: 'DESC' },
     });
-    return this.serializeTransferencias(transferencias);
+
+    if (usuario.role === 'master') return this.serializeTransferencias(transferencias);
+    if (usuario.role === 'directivo_liga') {
+      if (!usuario.ligaId) return [];
+      return this.serializeTransferencias(
+        transferencias.filter((item) => item.campeonato?.ligaId === usuario.ligaId),
+      );
+    }
+    if (usuario.role === 'dirigente_equipo') {
+      if (!usuario.equipoId) return [];
+      return this.serializeTransferencias(
+        transferencias.filter(
+          (item) =>
+            item.equipoOrigenId === usuario.equipoId ||
+            item.equipoDestinoId === usuario.equipoId,
+        ),
+      );
+    }
+    return [];
   }
 
   async cancelar(id: number, usuario: any): Promise<void> {

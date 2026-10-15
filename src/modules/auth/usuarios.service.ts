@@ -165,20 +165,26 @@ export class UsuariosService {
 
     const rolRequester = requester.rol?.nombre;
 
-    // Directivo_liga: solo puede cambiar contraseña de su propio usuario
-    // o de otros directivo_liga de la misma liga
+    const esElMismo = requester.id === id;
+
     if (rolRequester === 'directivo_liga') {
-      const esElMismo = requester.id === id;
-      const esDirectivoMismaLiga =
-        usuario.rol?.nombre === 'directivo_liga' &&
+      // El directivo administra las contraseñas de los usuarios de su liga,
+      // pero nunca la del usuario master.
+      const perteneceMismaLiga =
         requester.ligaId != null &&
         usuario.ligaId === requester.ligaId;
+      const usuarioObjetivoEsMaster = usuario.rol?.nombre === 'master';
 
-      if (!esElMismo && !esDirectivoMismaLiga) {
+      if (!esElMismo && (!perteneceMismaLiga || usuarioObjetivoEsMaster)) {
         throw new ForbiddenException(
           'No tienes permisos para cambiar la contraseña de este usuario',
         );
       }
+    } else if (rolRequester !== 'master' && !esElMismo) {
+      // Los demás roles solo pueden cambiar su propia contraseña.
+      throw new ForbiddenException(
+        'No tienes permisos para cambiar la contraseña de este usuario',
+      );
     }
 
     // Hashear la nueva contraseña

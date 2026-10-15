@@ -17,7 +17,9 @@ import { PagarCobroPartidoDto } from './dto/pagar-cobro-partido.dto';
 import { CreateMovimientoTesoreriaDto } from './dto/create-movimiento-tesoreria.dto';
 import { UpdateMovimientoTesoreriaDto } from './dto/update-movimiento-tesoreria.dto';
 import { TrasladarSaldoDto } from './dto/trasladar-saldo.dto';
+import { IniciarOperacionTesoreriaDto } from './dto/iniciar-operacion-tesoreria.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CreateCierreCajaTesoreriaDto } from './dto/create-cierre-caja-tesoreria.dto';
 
 /**
  * Controlador de Tesorería
@@ -45,18 +47,61 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 export class TesoreriaController {
   constructor(private readonly tesoreriaService: TesoreriaService) {}
 
+  @Get('cierres/preview')
+  previsualizarCierre(
+    @Query('ligaId', ParseIntPipe) ligaId: number,
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Query('fechaCorte') fechaCorte: string,
+    @Request() req: any,
+  ) {
+    return this.tesoreriaService.previsualizarCierreCaja(
+      ligaId,
+      campeonatoId,
+      fechaCorte,
+      req.user,
+    );
+  }
+
+  @Get('cierres')
+  listarCierres(
+    @Query('ligaId', ParseIntPipe) ligaId: number,
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Request() req: any,
+  ) {
+    return this.tesoreriaService.listarCierresCaja(ligaId, campeonatoId, req.user);
+  }
+
+  @Post('cierres')
+  crearCierre(@Body() dto: CreateCierreCajaTesoreriaDto, @Request() req: any) {
+    return this.tesoreriaService.crearCierreCaja(dto, req.user);
+  }
+
+  @Get('inicio-operativo')
+  consultarInicioOperativo(
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Query('ligaId', ParseIntPipe) ligaId: number,
+    @Request() req: any,
+  ) {
+    return this.tesoreriaService.consultarInicioOperativo(campeonatoId, ligaId, req.user);
+  }
+
+  @Post('inicio-operativo')
+  iniciarOperacion(@Body() dto: IniciarOperacionTesoreriaDto, @Request() req: any) {
+    return this.tesoreriaService.iniciarOperacion(dto, req.user);
+  }
+
   // ── Config Vocalía ────────────────────────────────────────────────────────
 
   @Get('config-vocalia/:ligaId')
-  obtenerConfigVocalia(@Param('ligaId', ParseIntPipe) ligaId: number) {
-    return this.tesoreriaService.obtenerConfigVocalia(ligaId);
+  obtenerConfigVocalia(@Param('ligaId', ParseIntPipe) ligaId: number, @Request() req: any) {
+    return this.tesoreriaService.obtenerConfigVocalia(ligaId, req.user);
   }
 
   @Patch('config-vocalia/:ligaId')
   guardarConfigVocalia(
     @Param('ligaId', ParseIntPipe) ligaId: number,
     @Body() dto: GuardarConfigVocaliaDto,
-    @Request() req: any,
+    @Request() req?: any,
   ) {
     return this.tesoreriaService.guardarConfigVocalia(ligaId, dto, req.user);
   }
@@ -69,8 +114,8 @@ export class TesoreriaController {
   }
 
   @Get('cobros-partido/partido/:partidoId')
-  cobrosDePartido(@Param('partidoId', ParseIntPipe) partidoId: number) {
-    return this.tesoreriaService.cobrosDePartido(partidoId);
+  cobrosDePartido(@Param('partidoId', ParseIntPipe) partidoId: number, @Request() req: any) {
+    return this.tesoreriaService.cobrosDePartido(partidoId, req.user);
   }
 
   @Get('cobros-partido')
@@ -81,6 +126,8 @@ export class TesoreriaController {
     @Query('partidoId')    partidoId?: string,
     @Query('jornada')      jornada?: string,
     @Query('estado')       estado?: string,
+    @Query('incluirHistorial') incluirHistorial?: string,
+    @Request() req?: any,
   ) {
     return this.tesoreriaService.listarCobrosPartido({
       ligaId:       ligaId       ? Number(ligaId)       : undefined,
@@ -89,7 +136,8 @@ export class TesoreriaController {
       partidoId:    partidoId    ? Number(partidoId)    : undefined,
       jornada:      jornada      ? Number(jornada)      : undefined,
       estado,
-    });
+      incluirHistorial: incluirHistorial === 'true',
+    }, req.user);
   }
 
   @Patch('cobros-partido/:id/pagar')
@@ -125,6 +173,7 @@ export class TesoreriaController {
     @Query('tipo')         tipo?: string,
     @Query('categoria')    categoria?: string,
     @Query('estado')       estado?: string,
+    @Request() req?: any,
   ) {
     return this.tesoreriaService.listarMovimientos({
       ligaId:       ligaId       ? Number(ligaId)       : undefined,
@@ -133,7 +182,7 @@ export class TesoreriaController {
       tipo,
       categoria,
       estado,
-    });
+    }, req.user);
   }
 
   @Patch('movimientos/:id')
@@ -145,6 +194,21 @@ export class TesoreriaController {
     return this.tesoreriaService.actualizarMovimiento(id, dto, req.user);
   }
 
+  // ── Cuenta consolidada por equipo ────────────────────────────────────────
+
+  @Get('deudas')
+  deudasConsolidadas(
+    @Query('ligaId', ParseIntPipe) ligaId: number,
+    @Query('equipoId') equipoId?: string,
+    @Request() req?: any,
+  ) {
+    return this.tesoreriaService.deudasConsolidadas(
+      ligaId,
+      equipoId ? Number(equipoId) : undefined,
+      req.user,
+    );
+  }
+
   // ── Libro de Caja ──────────────────────────────────────────────────────────
 
   @Get('libro-caja')
@@ -153,13 +217,14 @@ export class TesoreriaController {
     @Query('campeonatoId') campeonatoId?: string,
     @Query('fechaDesde')   fechaDesde?: string,
     @Query('fechaHasta')   fechaHasta?: string,
+    @Request() req?: any,
   ) {
     return this.tesoreriaService.getLibroCaja({
       ligaId:       ligaId       ? Number(ligaId)       : undefined,
       campeonatoId: campeonatoId ? Number(campeonatoId) : undefined,
       fechaDesde,
       fechaHasta,
-    });
+    }, req.user);
   }
 
   // ── Resumen de Caja ───────────────────────────────────────────────────────
@@ -168,8 +233,9 @@ export class TesoreriaController {
   resumenCaja(
     @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
     @Query('ligaId', ParseIntPipe)       ligaId: number,
+    @Request() req: any,
   ) {
-    return this.tesoreriaService.resumenCaja(campeonatoId, ligaId);
+    return this.tesoreriaService.resumenCaja(campeonatoId, ligaId, req.user);
   }
 
   // ── Traslado de saldo entre campeonatos ───────────────────────────────────

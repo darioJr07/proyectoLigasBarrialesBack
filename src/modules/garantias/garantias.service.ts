@@ -5,13 +5,15 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { GarantiaEquipo } from './entities/garantia-equipo.entity';
 import { PrestamoFondo } from './entities/prestamo-fondo.entity';
 import { MovimientoTesoreria } from '../tesoreria/entities/movimiento-tesoreria.entity';
 import { CreateGarantiaDto } from './dto/create-garantia.dto';
 import { AccionGarantiaDto } from './dto/accion-garantia.dto';
 import { CreatePrestamoFondoDto } from './dto/create-prestamo-fondo.dto';
+import { RecibosTesoreriaService } from '../recibos-tesoreria/recibos-tesoreria.service';
+import { CierreCajaControlService } from '../tesoreria/cierre-caja-control.service';
 
 const ROLES_PERMITIDOS = ['master', 'directivo_liga', 'tesoreria'];
 
@@ -24,7 +26,19 @@ export class GarantiasService {
     private prestamoRepo: Repository<PrestamoFondo>,
     @InjectRepository(MovimientoTesoreria)
     private movimientoRepo: Repository<MovimientoTesoreria>,
+    private dataSource: DataSource,
+    private recibosService: RecibosTesoreriaService,
+    private cierreControl: CierreCajaControlService,
   ) {}
+
+  private validarAccesoLiga(ligaId: number, usuario: any): void {
+    if (!ROLES_PERMITIDOS.includes(usuario?.role)) {
+      throw new ForbiddenException('Sin permisos para gestionar garantías.');
+    }
+    if (usuario.role !== 'master' && Number(usuario.ligaId) !== Number(ligaId)) {
+      throw new ForbiddenException('No tiene permisos para gestionar garantías de otra liga.');
+    }
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // GARANTÍAS INDIVIDUALES
@@ -36,6 +50,7 @@ export class GarantiasService {
    * para el mismo equipo en la misma liga.
    */
   async crearGarantia(dto: CreateGarantiaDto, usuario: any): Promise<GarantiaEquipo> {
+    this.validarAccesoLiga(dto.ligaId, usuario);
     if (!ROLES_PERMITIDOS.includes(usuario.role)) {
       throw new ForbiddenException('Sin permisos para gestionar garantías.');
     }
@@ -69,7 +84,8 @@ export class GarantiasService {
    * Lista todas las garantías de una liga.
    * Incluye historial completo (ejecutadas y devueltas).
    */
-  async listarGarantias(ligaId: number): Promise<GarantiaEquipo[]> {
+  async listarGarantias(ligaId: number, usuario: any): Promise<GarantiaEquipo[]> {
+    this.validarAccesoLiga(ligaId, usuario);
     return this.garantiaRepo.find({
       where: { ligaId },
       order: { creadoEn: 'DESC' },
@@ -79,20 +95,38 @@ export class GarantiasService {
   /**
    * Marca una garantía como pagada (pendiente → pagada).
    */
-  async marcarPagada(id: number, usuario: any): Promise<GarantiaEquipo> {
+  async marcarPagada(id: number, usuario: any): Promise<GarantiaEquipo & { recibo: unknown }> {
     if (!ROLES_PERMITIDOS.includes(usuario.role)) {
       throw new ForbiddenException('Sin permisos para gestionar garantías.');
     }
 
-    const garantia = await this.garantiaRepo.findOneBy({ id });
-    if (!garantia) throw new NotFoundException('Garantía no encontrada.');
-    if (garantia.estado !== 'pendiente') {
-      throw new BadRequestException(`La garantía está en estado '${garantia.estado}', solo se puede pagar si está pendiente.`);
-    }
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query('SELECT id FROM garantia_equipo WHERE id = $1 FOR UPDATE', [id]);
+      const garantiaRepo = manager.getRepository(GarantiaEquipo);
+      const garantia = await garantiaRepo.findOneBy({ id });
+      if (!garantia) throw new NotFoundException('Garantía no encontrada.');
+      this.validarAccesoLiga(garantia.ligaId, usuario);
+      if (garantia.estado !== 'pendiente') {
+        throw new BadRequestException(`La garantía está en estado '${garantia.estado}', solo se puede pagar si está pendiente.`);
+      }
 
-    garantia.estado = 'pagada';
-    garantia.fechaPago = new Date();
-    return this.garantiaRepo.save(garantia);
+      garantia.estado = 'pagada';
+      garantia.fechaPago = new Date();
+      const actualizada = await garantiaRepo.save(garantia);
+      const recibo = await this.recibosService.emitir({
+        ligaId: garantia.ligaId,
+        campeonatoId: null,
+        equipoId: garantia.equipoId,
+        origen: 'garantia',
+        origenId: garantia.id,
+        concepto: 'Depósito de garantía del equipo',
+        monto: Number(garantia.monto),
+        fechaPago: garantia.fechaPago,
+        emitidoPorId: usuario.sub ?? usuario.id,
+      }, manager);
+
+      return Object.assign(actualizada, { recibo });
+    });
   }
 
   /**
@@ -110,12 +144,14 @@ export class GarantiasService {
 
     const garantia = await this.garantiaRepo.findOneBy({ id });
     if (!garantia) throw new NotFoundException('Garantía no encontrada.');
+    this.validarAccesoLiga(garantia.ligaId, usuario);
     if (garantia.estado !== 'pagada') {
       throw new BadRequestException(`Solo se puede resolver una garantía pagada. Estado actual: '${garantia.estado}'.`);
     }
     if (!dto.motivo || dto.motivo.trim() === '') {
       throw new BadRequestException('El motivo es obligatorio al devolver o ejecutar una garantía.');
     }
+    await this.cierreControl.validarFechaOperacion(dto.campeonatoId, new Date());
 
     const nuevoEstado = dto.accion === 'ejecutar' ? 'ejecutada' : 'devuelta';
     const tipoMovimiento = dto.accion === 'ejecutar' ? 'ingreso' : 'egreso';
@@ -152,12 +188,13 @@ export class GarantiasService {
   /**
    * Calcula el estado actual del fondo de garantías de una liga.
    */
-  async resumenFondo(ligaId: number): Promise<{
+  async resumenFondo(ligaId: number, usuario?: any): Promise<{
     totalCustodiado: number;
     prestamosActivos: number;
     garantiasEjecutadas: number;
     fondoDisponible: number;
   }> {
+    if (usuario) this.validarAccesoLiga(ligaId, usuario);
     const garantiasPagadas = await this.garantiaRepo.find({
       where: { ligaId, estado: 'pagada' },
     });
@@ -190,9 +227,11 @@ export class GarantiasService {
    * Crea un INGRESO en movimientos_tesoreria (dinero entra a caja general).
    */
   async crearPrestamo(dto: CreatePrestamoFondoDto, usuario: any): Promise<PrestamoFondo> {
+    this.validarAccesoLiga(dto.ligaId, usuario);
     if (!ROLES_PERMITIDOS.includes(usuario.role)) {
       throw new ForbiddenException('Sin permisos para gestionar préstamos del fondo.');
     }
+    await this.cierreControl.validarFechaOperacion(dto.campeonatoId, new Date());
 
     // Verificar que hay saldo disponible
     const resumen = await this.resumenFondo(dto.ligaId);
@@ -234,7 +273,8 @@ export class GarantiasService {
   /**
    * Lista todos los préstamos del fondo de una liga.
    */
-  async listarPrestamos(ligaId: number): Promise<PrestamoFondo[]> {
+  async listarPrestamos(ligaId: number, usuario: any): Promise<PrestamoFondo[]> {
+    this.validarAccesoLiga(ligaId, usuario);
     return this.prestamoRepo.find({
       where: { ligaId },
       order: { creadoEn: 'DESC' },
@@ -252,9 +292,11 @@ export class GarantiasService {
 
     const prestamo = await this.prestamoRepo.findOneBy({ id });
     if (!prestamo) throw new NotFoundException('Préstamo no encontrado.');
+    this.validarAccesoLiga(prestamo.ligaId, usuario);
     if (prestamo.estado !== 'tomado') {
       throw new BadRequestException('Este préstamo ya fue devuelto.');
     }
+    await this.cierreControl.validarFechaOperacion(campeonatoId, new Date());
 
     // Crear movimiento de egreso en caja (dinero sale de caja, regresa al fondo)
     const movimiento = this.movimientoRepo.create({

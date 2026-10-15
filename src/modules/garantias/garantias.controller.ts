@@ -44,13 +44,13 @@ export class GarantiasController {
   }
 
   @Get('resumen')
-  resumenFondo(@Query('ligaId', ParseIntPipe) ligaId: number) {
-    return this.garantiasService.resumenFondo(ligaId);
+  resumenFondo(@Query('ligaId', ParseIntPipe) ligaId: number, @Request() req: any) {
+    return this.garantiasService.resumenFondo(ligaId, req.user);
   }
 
   @Get()
-  listarGarantias(@Query('ligaId', ParseIntPipe) ligaId: number) {
-    return this.garantiasService.listarGarantias(ligaId);
+  listarGarantias(@Query('ligaId', ParseIntPipe) ligaId: number, @Request() req: any) {
+    return this.garantiasService.listarGarantias(ligaId, req.user);
   }
 
   @Patch(':id/pagar')
@@ -75,8 +75,8 @@ export class GarantiasController {
   }
 
   @Get('prestamos')
-  listarPrestamos(@Query('ligaId', ParseIntPipe) ligaId: number) {
-    return this.garantiasService.listarPrestamos(ligaId);
+  listarPrestamos(@Query('ligaId', ParseIntPipe) ligaId: number, @Request() req: any) {
+    return this.garantiasService.listarPrestamos(ligaId, req.user);
   }
 
   @Patch('prestamos/:id/devolver')

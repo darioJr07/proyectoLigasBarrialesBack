@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, In, Not, Repository } from 'typeorm';
 import { JugadorCampeonato } from './entities/jugador-campeonato.entity';
 import { CreateJugadorCampeonatoDto } from './dto/create-jugador-campeonato.dto';
 import { UpdateJugadorCampeonatoDto } from './dto/update-jugador-campeonato.dto';
@@ -33,7 +33,39 @@ export class JugadorCampeonatosService {
     private transferenciaRepo: Repository<Transferencia>,
     @InjectRepository(Sancion)
     private sancionRepo: Repository<Sancion>,
+    private dataSource: DataSource,
   ) {}
+
+  private async assertCampeonatoAccess(campeonato: Campeonato, usuario: any): Promise<void> {
+    if (usuario.role === 'master') return;
+
+    if (usuario.role === 'directivo_liga') {
+      if (!usuario.ligaId || campeonato.ligaId !== usuario.ligaId) {
+        throw new ForbiddenException('No tienes permisos para acceder a este campeonato');
+      }
+      return;
+    }
+
+    if (usuario.role === 'dirigente_equipo') {
+      if (!usuario.equipoId) {
+        throw new ForbiddenException('No tienes un equipo asignado');
+      }
+      const equipo = await this.equipoRepo.findOne({ where: { id: usuario.equipoId } });
+      if (!equipo || equipo.ligaId !== campeonato.ligaId) {
+        throw new ForbiddenException('No tienes permisos para acceder a este campeonato');
+      }
+      return;
+    }
+
+    throw new ForbiddenException('No tienes permisos para acceder a habilitaciones');
+  }
+
+  private async getCampeonatoAutorizado(campeonatoId: number, usuario: any): Promise<Campeonato> {
+    const campeonato = await this.campeonatoRepo.findOne({ where: { id: campeonatoId } });
+    if (!campeonato) throw new NotFoundException('Campeonato no encontrado');
+    await this.assertCampeonatoAccess(campeonato, usuario);
+    return campeonato;
+  }
 
   async create(dto: CreateJugadorCampeonatoDto, usuario: any): Promise<JugadorCampeonato> {
     // 1. Verificar que el campeonato existe y está en estado inscripcion_abierta
@@ -159,27 +191,40 @@ export class JugadorCampeonatosService {
     }
 
     // 9. Verificar habilitación existente
-    const inscripcionExistente = await this.jugadorCampeonatoRepo.findOne({
+    const inscripcionActiva = await this.jugadorCampeonatoRepo.findOne({
       where: {
         jugadorId: dto.jugadorId,
         campeonatoId: dto.campeonatoId,
+        activo: true,
       },
+      order: { fechaInscripcion: 'DESC' },
     });
 
     // Si existe una habilitación activa del MISMO equipo, no permitir duplicado
-    if (inscripcionExistente && inscripcionExistente.activo && inscripcionExistente.equipoId === dto.equipoId) {
+    if (inscripcionActiva && inscripcionActiva.equipoId === dto.equipoId) {
       throw new BadRequestException('Este jugador ya tiene una habilitación activa en el campeonato.');
     }
 
     // Si existe una habilitación inactiva/rechazada del MISMO equipo, reutilizarla
-    if (inscripcionExistente && !inscripcionExistente.activo && inscripcionExistente.equipoId === dto.equipoId) {
+    const solicitudRechazada = await this.jugadorCampeonatoRepo.findOne({
+      where: {
+        jugadorId: dto.jugadorId,
+        campeonatoId: dto.campeonatoId,
+        equipoId: dto.equipoId,
+        estado: 'rechazado',
+        activo: false,
+      },
+      order: { fechaInscripcion: 'DESC' },
+    });
+
+    if (solicitudRechazada) {
       // Validar límite de jugadores habilitados antes de reactivar
       const maxJugadores = campeonato.maxJugadoresHabilitados || 20;
       const habilitadosCount = await this.jugadorCampeonatoRepo.count({
         where: {
           campeonatoId: dto.campeonatoId,
           equipoId: dto.equipoId,
-          estado: 'habilitado',
+          estado: In(['pendiente', 'habilitado']),
           activo: true,
         },
       });
@@ -211,7 +256,7 @@ export class JugadorCampeonatosService {
 
       // Reactivar la ficha existente del mismo equipo
       await this.jugadorCampeonatoRepo.update(
-        { id: inscripcionExistente.id },
+        { id: solicitudRechazada.id },
         {
           categoriaId: dto.categoriaId,
           numeroCancha: dto.numeroCancha,
@@ -225,24 +270,15 @@ export class JugadorCampeonatosService {
           fechaInscripcion: new Date(),
         }
       );
-      return await this.jugadorCampeonatoRepo.findOne({ where: { id: inscripcionExistente.id } }) as JugadorCampeonato;
+      return await this.jugadorCampeonatoRepo.findOne({ where: { id: solicitudRechazada.id } }) as JugadorCampeonato;
     }
 
     // Si existe una habilitación de OTRO equipo (jugador transferido), dejarla como historial
     // y continuar para crear un nuevo registro abajo (no retorna aquí)
-    if (inscripcionExistente && inscripcionExistente.equipoId !== dto.equipoId) {
+    if (inscripcionActiva && inscripcionActiva.equipoId !== dto.equipoId) {
       // Asegurarse de que la ficha del equipo anterior quede inactiva con estado 'baja'
       // para que el historial sea claro y no quede como 'habilitado' inactivo (confuso)
-      if (inscripcionExistente.activo) {
-        await this.jugadorCampeonatoRepo.update(
-          { id: inscripcionExistente.id },
-          {
-            activo: false,
-            estado: 'baja',
-            observaciones: 'Baja por transferencia a otro equipo',
-          },
-        );
-      }
+      // El cierre se ejecuta despues de validar cupo y numero de camiseta.
       // Continúa al bloque de creación de nuevo registro
     }
 
@@ -252,7 +288,7 @@ export class JugadorCampeonatosService {
       where: {
         campeonatoId: dto.campeonatoId,
         equipoId: dto.equipoId,
-        estado: 'habilitado',
+        estado: In(['pendiente', 'habilitado']),
         activo: true,
       },
     });
@@ -283,12 +319,26 @@ export class JugadorCampeonatosService {
     }
 
     // 11. Crear nueva inscripción con estado pendiente
-    const jugadorCampeonato = this.jugadorCampeonatoRepo.create({
-      ...dto,
-      estado: 'pendiente',
-      solicitadoPor: usuario.userId,
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(JugadorCampeonato);
+      if (inscripcionActiva && inscripcionActiva.equipoId !== dto.equipoId) {
+        await repo.update(
+          { id: inscripcionActiva.id },
+          {
+            activo: false,
+            estado: 'baja',
+            observaciones: 'Baja por transferencia a otro equipo',
+          },
+        );
+      }
+
+      const jugadorCampeonato = repo.create({
+        ...dto,
+        estado: 'pendiente',
+        solicitadoPor: usuario.userId,
+      });
+      return repo.save(jugadorCampeonato);
     });
-    return await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
   }
 
   async findAll(usuario: any): Promise<JugadorCampeonato[]> {
@@ -296,10 +346,12 @@ export class JugadorCampeonatosService {
     const whereCondition: any = {};
 
     // Filtrar según rol
-    if (usuario.role === 'directivo_liga' && usuario.ligaId) {
+    if (usuario.role === 'directivo_liga') {
+      if (!usuario.ligaId) return [];
       // Obtener inscripciones de campeonatos de su liga
       whereCondition.campeonato = { ligaId: usuario.ligaId };
-    } else if (usuario.role === 'dirigente_equipo' && usuario.equipoId) {
+    } else if (usuario.role === 'dirigente_equipo') {
+      if (!usuario.equipoId) return [];
       // Solo inscripciones de su equipo (activas e inactivas para ver rechazadas)
       whereCondition.equipoId = usuario.equipoId;
     }
@@ -335,6 +387,7 @@ export class JugadorCampeonatosService {
   }
 
   async findByCampeonato(campeonatoId: number, usuario: any): Promise<JugadorCampeonato[]> {
+    await this.getCampeonatoAutorizado(campeonatoId, usuario);
     // No filtrar por activo para permitir ver habilitaciones rechazadas
     const whereCondition: any = { campeonatoId };
 
@@ -348,14 +401,6 @@ export class JugadorCampeonatosService {
       order: { fechaInscripcion: 'DESC' },
     });
 
-    // Validar acceso para directivo_liga
-    if (usuario.role === 'directivo_liga' && inscripciones.length > 0) {
-      const campeonato = inscripciones[0].campeonato;
-      if (campeonato.ligaId !== usuario.ligaId) {
-        throw new ForbiddenException('No tienes permisos para ver inscripciones de esta liga');
-      }
-    }
-
     return inscripciones;
   }
 
@@ -365,13 +410,16 @@ export class JugadorCampeonatosService {
    * Estos jugadores solo tienen equipoId en tabla jugadores, pero sin habilitación
    */
   async findDisponiblesParaTransferencia(campeonatoId: number, usuario: any): Promise<any[]> {
+    const campeonato = await this.getCampeonatoAutorizado(campeonatoId, usuario);
     // 1. Obtener todos los jugadores activos con equipo asignado (habilitados o no)
     const todosJugadores = await this.jugadorRepo.find({
       where: { activo: true },
       relations: ['equipo'],
     });
 
-    let jugadoresDisponibles = todosJugadores.filter(j => j.equipoId);
+    let jugadoresDisponibles = todosJugadores.filter(
+      (jugador) => jugador.equipoId && jugador.equipo?.ligaId === campeonato.ligaId,
+    );
 
     // 2. Filtrar según rol
     if (usuario.role === 'dirigente_equipo' && usuario.equipoId) {
@@ -381,7 +429,7 @@ export class JugadorCampeonatosService {
       );
       // Filtrar solo equipos de mi liga
       jugadoresDisponibles = jugadoresDisponibles.filter(
-        j => j.equipo && j.equipo.ligaId === usuario.ligaId
+        j => j.equipo && j.equipo.ligaId === campeonato.ligaId
       );
     }
 
@@ -409,7 +457,12 @@ export class JugadorCampeonatosService {
     equipoId: number,
     usuario: any,
   ): Promise<JugadorCampeonato[]> {
-    // Validar permisos
+    const campeonato = await this.getCampeonatoAutorizado(campeonatoId, usuario);
+    const equipo = await this.equipoRepo.findOne({ where: { id: equipoId } });
+    if (!equipo || equipo.ligaId !== campeonato.ligaId) {
+      throw new BadRequestException('El equipo no pertenece a la liga del campeonato');
+    }
+
     if (usuario.role === 'dirigente_equipo' && usuario.equipoId !== equipoId) {
       throw new ForbiddenException('No tienes permisos para ver jugadores de otro equipo');
     }
@@ -419,23 +472,26 @@ export class JugadorCampeonatosService {
       order: { numeroCancha: 'ASC' },
     });
 
-    // Validar acceso para directivo_liga
-    if (usuario.role === 'directivo_liga' && inscripciones.length > 0) {
-      const campeonato = inscripciones[0].campeonato;
-      if (campeonato.ligaId !== usuario.ligaId) {
-        throw new ForbiddenException('No tienes permisos para ver inscripciones de esta liga');
-      }
-    }
-
     return inscripciones;
   }
 
-  async findByJugador(jugadorId: number): Promise<JugadorCampeonato[]> {
+  async findByJugador(jugadorId: number, usuario: any): Promise<JugadorCampeonato[]> {
     // Devolver todas las habilitaciones incluyendo inactivas para el historial completo
-    return await this.jugadorCampeonatoRepo.find({
+    const habilitaciones = await this.jugadorCampeonatoRepo.find({
       where: { jugadorId },
       order: { fechaInscripcion: 'DESC' },
     });
+
+    if (usuario.role === 'master') return habilitaciones;
+    if (usuario.role === 'directivo_liga') {
+      if (!usuario.ligaId) return [];
+      return habilitaciones.filter((item) => item.campeonato?.ligaId === usuario.ligaId);
+    }
+    if (usuario.role === 'dirigente_equipo') {
+      if (!usuario.equipoId) return [];
+      return habilitaciones.filter((item) => item.equipoId === usuario.equipoId);
+    }
+    return [];
   }
 
   async update(id: number, dto: UpdateJugadorCampeonatoDto, usuario: any): Promise<JugadorCampeonato> {
@@ -534,6 +590,67 @@ export class JugadorCampeonatosService {
 
     if (jugadorCampeonato.estado !== 'pendiente') {
       throw new BadRequestException('Esta habilitación ya fue procesada');
+    }
+
+    const inscripcionEquipo = await this.inscripcionRepo.findOne({
+      where: {
+        campeonatoId: jugadorCampeonato.campeonatoId,
+        equipoId: jugadorCampeonato.equipoId,
+        activo: true,
+        estado: 'confirmada',
+      },
+    });
+    if (!inscripcionEquipo) {
+      throw new BadRequestException('El equipo ya no tiene una inscripcion confirmada en el campeonato');
+    }
+
+    const jugador = await this.jugadorRepo.findOne({
+      where: { id: jugadorCampeonato.jugadorId, activo: true },
+    });
+    if (!jugador || jugador.equipoId !== jugadorCampeonato.equipoId) {
+      throw new BadRequestException('El jugador ya no pertenece al equipo que solicito la habilitacion');
+    }
+
+    const otraHabilitacionActiva = await this.jugadorCampeonatoRepo.findOne({
+      where: {
+        id: Not(jugadorCampeonato.id),
+        jugadorId: jugadorCampeonato.jugadorId,
+        campeonatoId: jugadorCampeonato.campeonatoId,
+        activo: true,
+      },
+    });
+    if (otraHabilitacionActiva) {
+      throw new BadRequestException('El jugador ya tiene otra habilitacion activa en este campeonato');
+    }
+
+    const maxJugadores = jugadorCampeonato.campeonato.maxJugadoresHabilitados || 20;
+    const habilitadosCount = await this.jugadorCampeonatoRepo.count({
+      where: {
+        campeonatoId: jugadorCampeonato.campeonatoId,
+        equipoId: jugadorCampeonato.equipoId,
+        estado: 'habilitado',
+        activo: true,
+      },
+    });
+    if (habilitadosCount >= maxJugadores) {
+      throw new BadRequestException(
+        `El equipo ya alcanzo el limite de ${maxJugadores} jugadores habilitados`,
+      );
+    }
+
+    const numeroDuplicado = await this.jugadorCampeonatoRepo.findOne({
+      where: {
+        id: Not(jugadorCampeonato.id),
+        campeonatoId: jugadorCampeonato.campeonatoId,
+        equipoId: jugadorCampeonato.equipoId,
+        numeroCancha: jugadorCampeonato.numeroCancha,
+        activo: true,
+      },
+    });
+    if (numeroDuplicado) {
+      throw new BadRequestException(
+        `El numero de camiseta ${jugadorCampeonato.numeroCancha} ya esta asignado a otro jugador`,
+      );
     }
 
     jugadorCampeonato.estado = 'habilitado';
@@ -686,6 +803,7 @@ export class JugadorCampeonatosService {
     // Obtener ligaId del campeonato destino
     const campeonato = await this.campeonatoRepo.findOne({ where: { id: nuevoCampeonatoId } });
     if (!campeonato) throw new NotFoundException('Campeonato no encontrado.');
+    await this.assertCampeonatoAccess(campeonato, usuario);
 
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);

@@ -30,6 +30,58 @@ export class JugadoresService {
     private readonly uploadService: UploadService,
   ) {}
 
+  private getRole(usuario: any): string {
+    return usuario?.role ?? usuario?.rol?.nombre ?? '';
+  }
+
+  private assertCanAccessJugador(jugador: Jugador, usuario: any): void {
+    const role = this.getRole(usuario);
+
+    if (role === 'master') return;
+
+    if (role === 'directivo_liga') {
+      if (!usuario?.ligaId || jugador.equipo?.ligaId !== usuario.ligaId) {
+        throw new ForbiddenException('No tienes permisos para acceder a este jugador');
+      }
+      return;
+    }
+
+    if (role === 'dirigente_equipo') {
+      if (!usuario?.equipoId || jugador.equipoId !== usuario.equipoId) {
+        throw new ForbiddenException('No tienes permisos para acceder a este jugador');
+      }
+      return;
+    }
+
+    throw new ForbiddenException('No tienes permisos para acceder a jugadores');
+  }
+
+  private async assertCanAccessEquipo(equipoId: number, usuario: any): Promise<void> {
+    const role = this.getRole(usuario);
+    if (role === 'master') return;
+
+    const equipo = await this.equipoRepository.findOne({
+      where: { id: equipoId, activo: true },
+    });
+    if (!equipo) throw new NotFoundException('Equipo no encontrado');
+
+    if (role === 'directivo_liga') {
+      if (!usuario?.ligaId || equipo.ligaId !== usuario.ligaId) {
+        throw new ForbiddenException('No tienes permisos para acceder a jugadores de este equipo');
+      }
+      return;
+    }
+
+    if (role === 'dirigente_equipo') {
+      if (!usuario?.equipoId || equipo.id !== usuario.equipoId) {
+        throw new ForbiddenException('No tienes permisos para acceder a jugadores de este equipo');
+      }
+      return;
+    }
+
+    throw new ForbiddenException('No tienes permisos para acceder a jugadores');
+  }
+
   /**
    * Verifica si una URL corresponde a una imagen de Cloudinary
    */
@@ -82,6 +134,7 @@ export class JugadoresService {
     userId?: number,
     userRole?: string,
     userLigaId?: number,
+    userEquipoId?: number,
   ): Promise<Jugador> {
     const { equipoId, cedula, ...jugadorData } = createJugadorDto;
 
@@ -124,7 +177,7 @@ export class JugadoresService {
           }
         }
         // Dirigente de equipo solo puede crear jugadores para su equipo
-        else if (equipo.dirigenteId !== userId) {
+        else if (userRole === 'dirigente_equipo' && equipo.id !== userEquipoId) {
           throw new ForbiddenException(
             'No tienes permisos para asignar jugadores a este equipo',
           );
@@ -205,7 +258,8 @@ export class JugadoresService {
   /**
    * Obtener jugadores por equipo
    */
-  async findByEquipo(equipoId: number): Promise<Jugador[]> {
+  async findByEquipo(equipoId: number, usuario: any): Promise<Jugador[]> {
+    await this.assertCanAccessEquipo(equipoId, usuario);
     return this.jugadorRepository.find({
       where: { equipoId, activo: true },
       order: { nombre: 'ASC' },
@@ -215,7 +269,10 @@ export class JugadoresService {
   /**
    * Obtener jugadores sin equipo
    */
-  async findLibres(): Promise<Jugador[]> {
+  async findLibres(usuario: any): Promise<Jugador[]> {
+    if (this.getRole(usuario) !== 'master') {
+      throw new ForbiddenException('Solo el administrador puede consultar jugadores sin equipo');
+    }
     return this.jugadorRepository.find({
       where: { equipoId: IsNull(), activo: true },
       order: { nombre: 'ASC' },
@@ -225,12 +282,14 @@ export class JugadoresService {
   /**
    * Obtener un jugador por ID
    */
-  async findOne(id: number): Promise<Jugador> {
+  async findOne(id: number, usuario?: any): Promise<Jugador> {
     const jugador = await this.jugadorRepository.findOne({ where: { id } });
 
     if (!jugador) {
       throw new NotFoundException(`Jugador con ID ${id} no encontrado`);
     }
+
+    if (usuario) this.assertCanAccessJugador(jugador, usuario);
 
     return jugador;
   }
@@ -244,8 +303,15 @@ export class JugadoresService {
     userId: number,
     userRole: string,
     userLigaId?: number,
+    userEquipoId?: number,
   ): Promise<Jugador> {
     const jugador = await this.findOne(id);
+
+    this.assertCanAccessJugador(jugador, {
+      role: userRole,
+      ligaId: userLigaId,
+      equipoId: userEquipoId,
+    });
 
     // Validar cédula única si se actualiza
     if (updateJugadorDto.cedula && updateJugadorDto.cedula !== jugador.cedula) {
@@ -290,7 +356,7 @@ export class JugadoresService {
             }
           }
           // Dirigente de equipo solo puede editar jugadores de su equipo
-          else if (equipo.dirigenteId !== userId) {
+          else if (userRole === 'dirigente_equipo' && equipo.id !== userEquipoId) {
             throw new ForbiddenException(
               'No tienes permisos para asignar jugadores a este equipo',
             );

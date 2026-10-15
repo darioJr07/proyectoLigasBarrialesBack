@@ -59,8 +59,9 @@ export class DerramasController {
   deudasEquipo(
     @Query('ligaId', ParseIntPipe) ligaId: number,
     @Query('equipoId', ParseIntPipe) equipoId: number,
+    @Request() req: any,
   ) {
-    return this.derramasService.deudasDerramaEquipo(ligaId, equipoId);
+    return this.derramasService.deudasDerramaEquipo(ligaId, equipoId, req.user);
   }
 
   /**
@@ -71,20 +72,21 @@ export class DerramasController {
   vocaliasActivas(
     @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
     @Query('equipoId', ParseIntPipe) equipoId: number,
+    @Request() req: any,
   ) {
-    return this.derramasService.derramasVocaliaActivas(campeonatoId, equipoId);
+    return this.derramasService.derramasVocaliaActivas(campeonatoId, equipoId, req.user);
   }
 
   /** Lista derramas de un campeonato con resumen de cobros */
   @Get()
-  listar(@Query('campeonatoId', ParseIntPipe) campeonatoId: number) {
-    return this.derramasService.listarPorCampeonato(campeonatoId);
+  listar(@Query('campeonatoId', ParseIntPipe) campeonatoId: number, @Request() req: any) {
+    return this.derramasService.listarPorCampeonato(campeonatoId, req.user);
   }
 
   /** Detalle de una derrama con sus equipos */
   @Get(':id')
-  detalle(@Param('id', ParseIntPipe) id: number) {
-    return this.derramasService.obtenerDetalle(id);
+  detalle(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.derramasService.obtenerDetalle(id, req.user);
   }
 
   /** Asigna o actualiza los equipos de una derrama en bloque */

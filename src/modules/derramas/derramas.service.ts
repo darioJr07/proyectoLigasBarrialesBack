@@ -5,7 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { DataSource, Repository, In } from 'typeorm';
 import { Derrama } from './entities/derrama.entity';
 import { DerramaEquipo } from './entities/derrama-equipo.entity';
 import { MovimientoTesoreria } from '../tesoreria/entities/movimiento-tesoreria.entity';
@@ -15,6 +15,8 @@ import {
   ActualizarDerramaEquipoDto,
   PagarDerramaEquipoDto,
 } from './dto/derrama-equipo.dto';
+import { RecibosTesoreriaService } from '../recibos-tesoreria/recibos-tesoreria.service';
+import { CierreCajaControlService } from '../tesoreria/cierre-caja-control.service';
 
 const ROLES_PERMITIDOS = ['master', 'directivo_liga', 'tesoreria'];
 
@@ -27,7 +29,19 @@ export class DerramasService {
     private derramaEquipoRepo: Repository<DerramaEquipo>,
     @InjectRepository(MovimientoTesoreria)
     private movimientoRepo: Repository<MovimientoTesoreria>,
+    private dataSource: DataSource,
+    private recibosService: RecibosTesoreriaService,
+    private cierreControl: CierreCajaControlService,
   ) {}
+
+  private validarAccesoLiga(ligaId: number, usuario: any): void {
+    if (!ROLES_PERMITIDOS.includes(usuario?.role)) {
+      throw new ForbiddenException('Sin permisos para gestionar derramas.');
+    }
+    if (usuario.role !== 'master' && Number(usuario.ligaId) !== Number(ligaId)) {
+      throw new ForbiddenException('No tiene permisos para gestionar derramas de otra liga.');
+    }
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // DERRAMAS — CRUD
@@ -38,6 +52,8 @@ export class DerramasService {
    * Solo master, directivo_liga y tesorería pueden crear.
    */
   async crear(dto: CreateDerramaDto, usuario: any): Promise<Derrama> {
+    this.validarAccesoLiga(dto.ligaId, usuario);
+    await this.cierreControl.validarCampeonatoAbierto(dto.campeonatoId);
     if (!ROLES_PERMITIDOS.includes(usuario.role)) {
       throw new ForbiddenException('Sin permisos para crear derramas.');
     }
@@ -57,11 +73,12 @@ export class DerramasService {
    * Lista todas las derramas de un campeonato, incluyendo
    * el resumen de estado de pago por equipo.
    */
-  async listarPorCampeonato(campeonatoId: number): Promise<any[]> {
+  async listarPorCampeonato(campeonatoId: number, usuario: any): Promise<any[]> {
     const derramas = await this.derramaRepo.find({
       where: { campeonatoId },
       order: { creadoEn: 'DESC' },
     });
+    for (const derrama of derramas) this.validarAccesoLiga(derrama.ligaId, usuario);
 
     // Para cada derrama, cargamos los equipos y calculamos totales
     const resultado = await Promise.all(
@@ -86,9 +103,10 @@ export class DerramasService {
   /**
    * Obtiene el detalle completo de una derrama: datos + estado por equipo.
    */
-  async obtenerDetalle(id: number): Promise<any> {
+  async obtenerDetalle(id: number, usuario: any): Promise<any> {
     const derrama = await this.derramaRepo.findOne({ where: { id } });
     if (!derrama) throw new NotFoundException(`Derrama #${id} no encontrada.`);
+    this.validarAccesoLiga(derrama.ligaId, usuario);
 
     const equipos = await this.derramaEquipoRepo.find({
       where: { derramaId: id },
@@ -114,6 +132,8 @@ export class DerramasService {
     }
     const derrama = await this.derramaRepo.findOne({ where: { id } });
     if (!derrama) throw new NotFoundException(`Derrama #${id} no encontrada.`);
+    this.validarAccesoLiga(derrama.ligaId, usuario);
+    await this.cierreControl.validarCampeonatoAbierto(derrama.campeonatoId);
     if (derrama.estado === 'cerrada') {
       throw new BadRequestException('No se pueden modificar equipos de una derrama cerrada.');
     }
@@ -159,8 +179,11 @@ export class DerramasService {
     }
     const reg = await this.derramaEquipoRepo.findOne({
       where: { derramaId, equipoId },
+      relations: ['derrama'],
     });
     if (!reg) throw new NotFoundException('Asignación no encontrada.');
+    this.validarAccesoLiga(reg.derrama.ligaId, usuario);
+    await this.cierreControl.validarCampeonatoAbierto(reg.derrama.campeonatoId);
     if (reg.estado === 'pagado') {
       throw new BadRequestException('No se puede modificar un equipo que ya pagó.');
     }
@@ -212,6 +235,8 @@ export class DerramasService {
       relations: ['derrama'],
     });
     if (!reg) throw new NotFoundException('Asignación no encontrada.');
+    this.validarAccesoLiga(reg.derrama.ligaId, usuario);
+    await this.cierreControl.validarCampeonatoAbierto(reg.derrama.campeonatoId);
     if (reg.estado === 'pagado') throw new BadRequestException('El equipo ya pagó esta derrama.');
     if (reg.modoPago !== 'por_vocalia') {
       throw new BadRequestException('Solo se pueden dividir en cuotas las derramas en modo "por vocalía".');
@@ -246,51 +271,78 @@ export class DerramasService {
     equipoId: number,
     dto: PagarDerramaEquipoDto,
     usuario: any,
-  ): Promise<DerramaEquipo> {
+  ): Promise<DerramaEquipo & { recibo: unknown }> {
     if (!ROLES_PERMITIDOS.includes(usuario.role)) {
       throw new ForbiddenException('Sin permisos para registrar pagos.');
     }
 
-    const reg = await this.derramaEquipoRepo.findOne({
-      where: { derramaId, equipoId },
-      relations: ['derrama'],
-    });
-    if (!reg) throw new NotFoundException('Asignación no encontrada.');
-    if (reg.estado === 'pagado') {
-      throw new BadRequestException('Este equipo ya canceló su parte de la derrama.');
-    }
-    if (reg.modoPago === 'por_vocalia') {
-      throw new BadRequestException(
-        'Esta derrama se cobra automáticamente mediante las vocalías de partido. No se permiten pagos manuales para evitar duplicados en el libro de caja.',
+    return this.dataSource.transaction(async (manager) => {
+      await manager.query(
+        'SELECT id FROM derrama_equipo WHERE derrama_id = $1 AND equipo_id = $2 FOR UPDATE',
+        [derramaId, equipoId],
       );
-    }
+      const regRepo = manager.getRepository(DerramaEquipo);
+      const reg = await regRepo.findOne({
+        where: { derramaId, equipoId },
+        relations: ['derrama'],
+      });
+      if (!reg) throw new NotFoundException('Asignación no encontrada.');
+      this.validarAccesoLiga(reg.derrama.ligaId, usuario);
+      const campeonatoPagoId = dto.campeonatoId ?? reg.derrama.campeonatoId;
+      await this.cierreControl.validarFechaOperacion(campeonatoPagoId, new Date(), manager);
+      if (reg.estado === 'pagado') {
+        throw new BadRequestException('Este equipo ya canceló su parte de la derrama.');
+      }
+      if (reg.modoPago === 'por_vocalia' && reg.estado !== 'arrastrado') {
+        throw new BadRequestException(
+          'Esta derrama se cobra automáticamente mediante las vocalías de partido. No se permiten pagos manuales para evitar duplicados en el libro de caja.',
+        );
+      }
 
-    const nuevoAbonado = Number(reg.montoAbonado) + Number(dto.monto);
-    if (nuevoAbonado > Number(reg.montoTotal)) {
-      throw new BadRequestException(
-        `El pago ($${dto.monto}) supera el saldo pendiente ($${(Number(reg.montoTotal) - Number(reg.montoAbonado)).toFixed(2)}).`,
-      );
-    }
+      const nuevoAbonado = Number(reg.montoAbonado) + Number(dto.monto);
+      if (nuevoAbonado > Number(reg.montoTotal)) {
+        throw new BadRequestException(
+          `El pago ($${dto.monto}) supera el saldo pendiente ($${(Number(reg.montoTotal) - Number(reg.montoAbonado)).toFixed(2)}).`,
+        );
+      }
 
-    reg.montoAbonado = Number(nuevoAbonado.toFixed(2));
-    reg.estado = nuevoAbonado >= Number(reg.montoTotal) ? 'pagado' : 'parcial';
-    await this.derramaEquipoRepo.save(reg);
+      const eraArrastrado = reg.estado === 'arrastrado';
+      reg.montoAbonado = Number(nuevoAbonado.toFixed(2));
+      reg.estado = nuevoAbonado >= Number(reg.montoTotal)
+        ? 'pagado'
+        : (eraArrastrado ? 'arrastrado' : 'parcial');
+      const regGuardado = await regRepo.save(reg);
 
-    // Registrar en el libro de caja
-    const movimiento = this.movimientoRepo.create({
-      ligaId:           reg.derrama.ligaId,
-      campeonatoId:     dto.campeonatoId ?? reg.derrama.campeonatoId,
-      equipoId,
-      tipo:             'ingreso',
-      categoria:        'derrama',
-      descripcion:      `Derrama: ${reg.derrama.descripcion}`,
-      monto:            Number(dto.monto),
-      estado:           'pagado',
-      origenAutomatico: false,
+      const movimientoRepo = manager.getRepository(MovimientoTesoreria);
+      const movimiento = movimientoRepo.create({
+        ligaId:           reg.derrama.ligaId,
+        campeonatoId:     campeonatoPagoId,
+        equipoId,
+        tipo:             'ingreso',
+        categoria:        'derrama',
+        descripcion:      `Derrama: ${reg.derrama.descripcion}`,
+        monto:            Number(dto.monto),
+        estado:           'pagado',
+        origenAutomatico: false,
+        creadoPorId:      usuario.sub ?? usuario.id,
+        fechaPago:        new Date(),
+      });
+      const movimientoGuardado = await movimientoRepo.save(movimiento);
+      const recibo = await this.recibosService.emitir({
+        ligaId: reg.derrama.ligaId,
+        campeonatoId: movimientoGuardado.campeonatoId,
+        equipoId,
+        origen: 'derrama',
+        origenId: reg.id,
+        movimientoId: movimientoGuardado.id,
+        concepto: `Derrama: ${reg.derrama.descripcion}`,
+        monto: Number(dto.monto),
+        fechaPago: movimientoGuardado.fechaPago ?? new Date(),
+        emitidoPorId: usuario.sub ?? usuario.id,
+      }, manager);
+
+      return Object.assign(regGuardado, { recibo });
     });
-    await this.movimientoRepo.save(movimiento);
-
-    return reg;
   }
 
   /**
@@ -305,6 +357,11 @@ export class DerramasService {
     ligaId: number,
     crearMovimiento = true,
   ): Promise<void> {
+    if (crearMovimiento) {
+      await this.cierreControl.validarFechaOperacion(campeonatoId, new Date());
+    } else {
+      await this.cierreControl.validarCampeonatoAbierto(campeonatoId);
+    }
     const reg = await this.derramaEquipoRepo.findOne({
       where: { derramaId, equipoId },
       relations: ['derrama'],
@@ -350,6 +407,8 @@ export class DerramasService {
     }
     const derrama = await this.derramaRepo.findOne({ where: { id } });
     if (!derrama) throw new NotFoundException(`Derrama #${id} no encontrada.`);
+    this.validarAccesoLiga(derrama.ligaId, usuario);
+    await this.cierreControl.validarCampeonatoAbierto(derrama.campeonatoId);
 
     derrama.estado = 'cerrada';
     await this.derramaRepo.save(derrama);
@@ -399,7 +458,8 @@ export class DerramasService {
    * Devuelve todas las derramas con saldo pendiente de un equipo en una liga.
    * Incluye derramas de campeonatos anteriores (estado 'arrastrado').
    */
-  async deudasDerramaEquipo(ligaId: number, equipoId: number): Promise<any[]> {
+  async deudasDerramaEquipo(ligaId: number, equipoId: number, usuario?: any): Promise<any[]> {
+    if (usuario) this.validarAccesoLiga(ligaId, usuario);
     const registros = await this.derramaEquipoRepo
       .createQueryBuilder('de')
       .innerJoinAndSelect('de.derrama', 'd')
@@ -445,7 +505,7 @@ export class DerramasService {
    * Devuelve las derramas 'por_vocalia' pendientes de un equipo en el campeonato activo.
    * Usada en acta-imprimir para pre-rellenar extras automáticamente.
    */
-  async derramasVocaliaActivas(campeonatoId: number, equipoId: number): Promise<any[]> {
+  async derramasVocaliaActivas(campeonatoId: number, equipoId: number, usuario?: any): Promise<any[]> {
     const registros = await this.derramaEquipoRepo
       .createQueryBuilder('de')
       .innerJoinAndSelect('de.derrama', 'd')
@@ -457,6 +517,10 @@ export class DerramasService {
       // Ante datos duplicados preexistentes: tomar solo el registro más reciente por derrama
       .orderBy('de.id', 'DESC')
       .getMany();
+
+    if (usuario) {
+      for (const registro of registros) this.validarAccesoLiga(registro.derrama.ligaId, usuario);
+    }
 
     // Deduplicar por derramaId: puede haber filas duplicadas si asignarEquipos se llamó
     // antes de este fix y generó más de un registro para el mismo (derramaId, equipoId).
@@ -498,6 +562,7 @@ export class DerramasService {
     descripcion:   string;
     creadoPorId:   number;
   }): Promise<void> {
+    await this.cierreControl.validarCampeonatoAbierto(params.campeonatoId);
     // Idempotencia: si ya existe una derrama automática con la misma descripción, no crear otra
     const yaExiste = await this.derramaRepo.findOne({
       where: {
