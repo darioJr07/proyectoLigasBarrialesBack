@@ -18,6 +18,8 @@ import { UpdateInscripcionDto } from './dto/update-inscripcion.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { ModuloHabilitado } from '../configuracion/decorators/modulo-habilitado.decorator';
+import { ModuloHabilitadoGuard } from '../configuracion/guards/modulo-habilitado.guard';
 
 @Controller('inscripciones')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -26,6 +28,8 @@ export class InscripcionesController {
 
   @Post()
   @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @UseGuards(ModuloHabilitadoGuard)
+  @ModuloHabilitado('modulo_inscripciones')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() createInscripcionDto: CreateInscripcionDto, @Request() req: any) {
     return this.inscripcionesService.create(createInscripcionDto, req.user);
@@ -119,6 +123,8 @@ export class InscripcionesController {
 
   @Delete(':id')
   @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @UseGuards(ModuloHabilitadoGuard)
+  @ModuloHabilitado('modulo_inscripciones')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
     return this.inscripcionesService.remove(id, req.user);

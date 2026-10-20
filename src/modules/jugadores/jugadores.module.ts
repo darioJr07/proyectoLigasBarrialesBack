@@ -6,13 +6,18 @@ import { Jugador } from './entities/jugador.entity';
 import { Equipo } from '../equipos/entities/equipo.entity';
 import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
 import { UploadModule } from '../upload/upload.module';
+import { ConfiguracionModule } from '../configuracion/configuracion.module';
 
 /**
  * Módulo de Jugadores
  * Organiza todos los componentes relacionados con jugadores
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([Jugador, Equipo, JugadorCampeonato]), UploadModule],
+  imports: [
+    TypeOrmModule.forFeature([Jugador, Equipo, JugadorCampeonato]),
+    UploadModule,
+    ConfiguracionModule,
+  ],
   controllers: [JugadoresController],
   providers: [JugadoresService],
   exports: [JugadoresService, TypeOrmModule],

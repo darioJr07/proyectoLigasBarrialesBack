@@ -11,9 +11,11 @@ import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
 import { Usuario } from '../auth/entities/usuario.entity';
 import { Transferencia } from '../transferencias/entities/transferencia.entity';
 import { Sancion } from '../sanciones/entities/sancion.entity';
+import { ConfiguracionModule } from '../configuracion/configuracion.module';
 
 @Module({
   imports: [
+    ConfiguracionModule,
     TypeOrmModule.forFeature([
       JugadorCampeonato,
       Jugador,

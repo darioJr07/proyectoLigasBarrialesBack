@@ -11,6 +11,8 @@ import { GolesService } from '../goles/goles.service';
 import { Sancion } from '../sanciones/entities/sancion.entity';
 import { ReglaSancion } from '../sanciones/entities/regla-sancion.entity';
 import { Jugador } from '../jugadores/entities/jugador.entity';
+import { EtapaCompetencia } from '../partidos/entities/etapa-competencia.entity';
+import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
 
 /**
  * Consultas expuestas al portal público.
@@ -37,6 +39,10 @@ export class PublicoService {
     private readonly reglasSancionRepository: Repository<ReglaSancion>,
     @InjectRepository(Jugador)
     private readonly jugadoresRepository: Repository<Jugador>,
+    @InjectRepository(EtapaCompetencia)
+    private readonly etapasRepository: Repository<EtapaCompetencia>,
+    @InjectRepository(JugadorCampeonato)
+    private readonly jugadorCampeonatosRepository: Repository<JugadorCampeonato>,
     private readonly tablaPosicionesService: TablaPosicionesService,
     private readonly golesService: GolesService,
   ) {}
@@ -129,10 +135,10 @@ export class PublicoService {
       }));
   }
 
-  async consultarPosiciones(campeonatoId: number, categoriaId: number, etapa: string) {
+  async consultarPosiciones(campeonatoId: number, categoriaId: number, etapa: string, grupoId?: number) {
     await this.buscarCategoriaPublica(campeonatoId, categoriaId);
 
-    const tabla = await this.tablaPosicionesService.calcular(campeonatoId, categoriaId, etapa);
+    const tabla = await this.tablaPosicionesService.calcular(campeonatoId, categoriaId, etapa, grupoId);
     const equipos = await this.equiposRepository.find({
       where: { id: In(tabla.map(fila => fila.equipoId)), activo: true },
     });
@@ -146,17 +152,55 @@ export class PublicoService {
 
   async listarEtapas(campeonatoId: number, categoriaId: number) {
     await this.buscarCategoriaPublica(campeonatoId, categoriaId);
+    const configuradas = await this.etapasRepository.find({
+      where: { campeonatoId, categoriaId, activo: true },
+      order: { orden: 'ASC', id: 'ASC' },
+    });
+    if (configuradas.length) return configuradas.map((etapa) => etapa.nombre);
+
     const filas = await this.partidosRepository
       .createQueryBuilder('partido')
       .select('partido.etapa', 'etapa')
+      .addSelect('MIN(partido.id)', 'primerPartidoId')
       .where('partido.campeonato_id = :campeonatoId', { campeonatoId })
       .andWhere('partido.categoria_id = :categoriaId', { categoriaId })
       .andWhere('partido.activo = true')
       .andWhere("partido.estado != 'cancelado'")
-      .distinct(true)
-      .orderBy('partido.etapa', 'ASC')
+      .groupBy('partido.etapa')
+      .orderBy('MIN(partido.id)', 'ASC')
       .getRawMany<{ etapa: string }>();
     return filas.map(fila => fila.etapa);
+  }
+
+  async listarEtapasDetalle(campeonatoId: number, categoriaId: number) {
+    await this.buscarCategoriaPublica(campeonatoId, categoriaId);
+    const etapas = await this.etapasRepository.find({
+      where: { campeonatoId, categoriaId, activo: true },
+      relations: ['grupos'],
+      order: { orden: 'ASC', id: 'ASC' },
+    });
+    if (etapas.length) {
+      return etapas.map((etapa) => ({
+        id: etapa.id,
+        nombre: etapa.nombre,
+        orden: etapa.orden,
+        formato: etapa.formato,
+        estado: etapa.estado,
+        grupos: (etapa.grupos ?? [])
+          .filter((grupo) => grupo.activo)
+          .sort((a, b) => a.orden - b.orden)
+          .map((grupo) => ({ id: grupo.id, nombre: grupo.nombre, orden: grupo.orden })),
+      }));
+    }
+    const nombres = await this.listarEtapas(campeonatoId, categoriaId);
+    return nombres.map((nombre, indice) => ({
+      id: null,
+      nombre,
+      orden: indice + 1,
+      formato: 'tabla_unica',
+      estado: indice === nombres.length - 1 ? 'actual' : 'finalizada',
+      grupos: [],
+    }));
   }
 
   async listarJornadas(campeonatoId: number, categoriaId: number, etapa: string) {
@@ -269,8 +313,33 @@ export class PublicoService {
       totalPorEquipoTipo.set(clave, (totalPorEquipoTipo.get(clave) ?? 0) + 1);
     }
 
+    const jugadoresSancionados = [...new Set(
+      sanciones.filter((sancion) => !!sancion.jugadorId).map((sancion) => sancion.jugadorId),
+    )];
+    const habilitacionesActuales = jugadoresSancionados.length
+      ? await this.jugadorCampeonatosRepository.find({
+          where: {
+            jugadorId: In(jugadoresSancionados),
+            campeonatoId,
+            estado: 'habilitado',
+            activo: true,
+          },
+          relations: ['equipo'],
+          order: { id: 'ASC' },
+        })
+      : [];
+    const equipoActualPorJugador = new Map<number, JugadorCampeonato>();
+    for (const habilitacion of habilitacionesActuales) {
+      equipoActualPorJugador.set(habilitacion.jugadorId, habilitacion);
+    }
+
     return sanciones.map(sancion => {
       const esJugador = sancion.tipoSancion?.aplicaA === 'jugador';
+      const habilitacionActual = sancion.jugadorId
+        ? equipoActualPorJugador.get(sancion.jugadorId)
+        : undefined;
+      const equipoActual = habilitacionActual?.equipo ?? sancion.equipo ?? null;
+      const cambioEquipo = !!habilitacionActual && !!sancion.equipoId && habilitacionActual.equipoId !== sancion.equipoId;
       const pendientes = Math.max(0, (sancion.partidosSuspension ?? 0) - (sancion.partidosCumplidos ?? 0));
       const regla = sancion.reglaSancion?.acumulacionActiva && sancion.reglaSancion.acumulacionCantidad
         ? sancion.reglaSancion
@@ -284,7 +353,10 @@ export class PublicoService {
         destino: sancion.tipoSancion?.aplicaA ?? 'equipo',
         sancionado: esJugador ? sancion.jugador?.nombre ?? 'Jugador' : sancion.equipo?.nombre ?? 'Sanción general',
         jugadorImagen: esJugador ? sancion.jugador?.imagen ?? null : null,
-        equipo: sancion.equipo ? { id: sancion.equipo.id, nombre: sancion.equipo.nombre, imagen: sancion.equipo.imagen } : null,
+        equipo: equipoActual ? { id: equipoActual.id, nombre: equipoActual.nombre, imagen: equipoActual.imagen } : null,
+        equipoOrigen: cambioEquipo && sancion.equipo
+          ? { id: sancion.equipo.id, nombre: sancion.equipo.nombre, imagen: sancion.equipo.imagen }
+          : null,
         tipo: sancion.tipoSancion?.nombre ?? 'Sanción',
         puntosDescuentoAplicado: sancion.puntosDescuentoAplicado ?? 0,
         partidosPendientes: esJugador && !sancion.fechaFinSuspension ? pendientes : null,

@@ -32,7 +32,13 @@ export class TablaPosicionesController {
     @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
     @Query('categoriaId', ParseIntPipe) categoriaId: number,
     @Query('etapa') etapa: string,
+    @Query('grupoId') grupoId?: string,
   ): Promise<FilaPosicion[]> {
-    return this.tablaPosicionesService.calcular(campeonatoId, categoriaId, etapa);
+    return this.tablaPosicionesService.calcular(
+      campeonatoId,
+      categoriaId,
+      etapa,
+      grupoId ? Number(grupoId) : undefined,
+    );
   }
 }

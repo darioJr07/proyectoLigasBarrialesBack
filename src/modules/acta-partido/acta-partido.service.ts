@@ -17,6 +17,7 @@ import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campe
 import { Sancion } from '../sanciones/entities/sancion.entity';
 import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { SancionPartidoExcluido } from '../sanciones/entities/sancion-partido-excluido.entity';
+import { VocaliaPartido } from '../partidos/entities/vocalia-partido.entity';
 
 @Injectable()
 export class ActaPartidoService {
@@ -43,7 +44,17 @@ export class ActaPartidoService {
 
     @InjectRepository(Campeonato)
     private readonly campeonatoRepo: Repository<Campeonato>,
+    @InjectRepository(VocaliaPartido)
+    private readonly vocaliaRepo: Repository<VocaliaPartido>,
   ) {}
+
+  private sancionTemporalVigente(sancion: Sancion): boolean {
+    if (!sancion.fechaFinSuspension) return true;
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const fin = new Date(`${String(sancion.fechaFinSuspension).slice(0, 10)}T00:00:00`);
+    return fin >= hoy;
+  }
 
   /**
    * Retorna los jugadores habilitados de ambos equipos para un partido,
@@ -98,7 +109,9 @@ export class ActaPartidoService {
     const exclusiones = sancionesActivas.length
       ? await this.sancionPartidoExcluidoRepo.find({ where: { partidoId, sancionId: In(sancionesActivas.map((s) => s.id)) } })
       : [];
-    const sancionesVigentes = sancionesActivas.filter((s) => !exclusiones.some((e) => e.sancionId === s.id));
+    const sancionesVigentes = sancionesActivas.filter(
+      (s) => this.sancionTemporalVigente(s) && !exclusiones.some((e) => e.sancionId === s.id),
+    );
 
     const idsSancionados = new Set(sancionesVigentes.map((s) => s.jugadorId));
 
@@ -170,7 +183,7 @@ export class ActaPartidoService {
       : [];
     const idsSancionados = new Set(
       sancionesActivas
-        .filter((s) => !exclusiones.some((e) => e.sancionId === s.id))
+        .filter((s) => this.sancionTemporalVigente(s) && !exclusiones.some((e) => e.sancionId === s.id))
         .map((s) => s.jugadorId),
     );
     const infractores = dto.jugadores.filter(
@@ -241,7 +254,11 @@ export class ActaPartidoService {
       order: { id: 'ASC' },
     });
 
-    return { partido, informe: informe ?? null, incidencias };
+    const vocaliaProgramada = await this.vocaliaRepo.findOne({
+      where: { partidoId, estado: 'confirmada' },
+    });
+
+    return { partido, informe: informe ?? null, incidencias, vocaliaProgramada: vocaliaProgramada ?? null };
   }
 
   /**

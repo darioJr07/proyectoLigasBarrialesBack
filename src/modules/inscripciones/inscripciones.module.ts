@@ -8,6 +8,7 @@ import { CampeonatosModule } from '../campeonatos/campeonatos.module';
 import { CategoriasModule } from '../categorias/categorias.module';
 import { EquiposModule } from '../equipos/equipos.module';
 import { TesoreriaModule } from '../tesoreria/tesoreria.module';
+import { ConfiguracionModule } from '../configuracion/configuracion.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { TesoreriaModule } from '../tesoreria/tesoreria.module';
     CategoriasModule,
     EquiposModule,
     TesoreriaModule,
+    ConfiguracionModule,
   ],
   controllers: [InscripcionesController],
   providers: [InscripcionesService],

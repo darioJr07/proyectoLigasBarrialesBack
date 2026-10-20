@@ -10,6 +10,7 @@ import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campe
 import { Sancion } from '../sanciones/entities/sancion.entity';
 import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { SancionPartidoExcluido } from '../sanciones/entities/sancion-partido-excluido.entity';
+import { VocaliaPartido } from '../partidos/entities/vocalia-partido.entity';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { SancionPartidoExcluido } from '../sanciones/entities/sancion-partido-ex
       Sancion,
       Campeonato,
       SancionPartidoExcluido,
+      VocaliaPartido,
     ]),
   ],
   controllers: [ActaPartidoController],

@@ -1,12 +1,14 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, IsNull, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Repository } from 'typeorm';
 import { randomInt } from 'crypto';
 import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { Partido } from './entities/partido.entity';
 import { ProgramacionSemanal } from './entities/programacion-semanal.entity';
 import { ProgramacionBolilla } from './entities/programacion-bolilla.entity';
 import { CrearProgramacionSemanalDto } from './dto/crear-programacion-semanal.dto';
+import { ConfigurarVocaliaDto } from './dto/vocalia-programacion.dto';
+import { VocaliaPartido } from './entities/vocalia-partido.entity';
 
 @Injectable()
 export class ProgramacionSemanalService {
@@ -15,6 +17,7 @@ export class ProgramacionSemanalService {
     @InjectRepository(ProgramacionBolilla) private readonly bolillas: Repository<ProgramacionBolilla>,
     @InjectRepository(Partido) private readonly partidos: Repository<Partido>,
     @InjectRepository(Campeonato) private readonly campeonatos: Repository<Campeonato>,
+    @InjectRepository(VocaliaPartido) private readonly vocalias: Repository<VocaliaPartido>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -68,26 +71,82 @@ export class ProgramacionSemanalService {
     return sesion ? this.detalle(sesion.id, usuario) : null;
   }
 
+  async listarConfirmadas(
+    campeonatoId: number,
+    categoriaId: number | undefined,
+    etapa: string | undefined,
+    jornada: number | undefined,
+    usuario: any,
+  ) {
+    const campeonato = await this.campeonatos.findOne({ where: { id: campeonatoId } });
+    if (!campeonato) throw new NotFoundException('Campeonato no encontrado.');
+    this.validarLiga(campeonato.ligaId, usuario);
+
+    if (categoriaId !== undefined && (!Number.isInteger(categoriaId) || categoriaId < 1)) {
+      throw new BadRequestException('La categoría indicada no es válida.');
+    }
+    if (jornada !== undefined && (!Number.isInteger(jornada) || jornada < 1)) {
+      throw new BadRequestException('La jornada indicada no es válida.');
+    }
+
+    const where: any = { campeonatoId, estado: 'confirmada' };
+    if (etapa?.trim()) where.etapa = etapa.trim();
+    if (jornada !== undefined) where.jornada = jornada;
+
+    const confirmadas = await this.programaciones.find({
+      where,
+      order: { confirmadoEn: 'DESC', creadoEn: 'DESC' },
+    });
+
+    // Una sesión sin categoría incluyó todos los encuentros de la jornada,
+    // por lo que también debe aparecer al filtrar por una categoría concreta.
+    return categoriaId === undefined
+      ? confirmadas
+      : confirmadas.filter(sesion => sesion.categoriaId === null || sesion.categoriaId === categoriaId);
+  }
+
   async detalle(id: number, usuario: any) {
     const sesion = await this.programaciones.findOne({ where: { id } });
     if (!sesion) throw new NotFoundException('Sesión de programación no encontrada.');
     this.validarLiga(sesion.ligaId, usuario);
     const bolillas = await this.bolillas.find({ where: { programacionId: id }, order: { numero: 'ASC' } });
-    // La sesión puede haberse iniciado antes de que un partido se registre como
-    // jugado (por ejemplo, por resultado administrativo). Solo los que siguen
-    // programados y sin horario deben participar o bloquear la confirmación.
-    const partidos = await this.partidos.find({ where: { campeonatoId: sesion.campeonatoId, etapa: sesion.etapa, jornada: sesion.jornada, activo: true } });
-    const incluidos = partidos.filter(p =>
-      (!sesion.categoriaId || p.categoriaId === sesion.categoriaId)
-      && p.estado === 'programado'
-      && (!p.fechaPartido || !p.horaPartido),
-    );
+    // Durante el sorteo solo participan encuentros programados sin horario.
+    // Una vez confirmada la sesión, esos encuentros ya tienen fecha y hora;
+    // por eso se reconstruyen desde los partidoId conservados en las bolillas.
+    // De esta forma la pantalla y las exportaciones mantienen local/visitante.
+    let incluidos: Partido[];
+    if (sesion.estado === 'confirmada') {
+      const partidoIds = [...new Set(
+        bolillas
+          .filter(bolilla => bolilla.estado === 'asignada' && !!bolilla.partidoId)
+          .map(bolilla => Number(bolilla.partidoId)),
+      )];
+      incluidos = partidoIds.length
+        ? await this.partidos.find({ where: { id: In(partidoIds), activo: true } })
+        : [];
+    } else {
+      const partidos = await this.partidos.find({
+        where: {
+          campeonatoId: sesion.campeonatoId,
+          etapa: sesion.etapa,
+          jornada: sesion.jornada,
+          activo: true,
+        },
+      });
+      // La sesión puede haberse iniciado antes de que un partido se registre
+      // como jugado (por ejemplo, por resultado administrativo).
+      incluidos = partidos.filter(p =>
+        (!sesion.categoriaId || p.categoriaId === sesion.categoriaId)
+        && p.estado === 'programado'
+        && (!p.fechaPartido || !p.horaPartido),
+      );
+    }
     const porId = new Map(incluidos.map(p => [p.id, p]));
     return {
       ...sesion,
       // Es un total operativo de la sesión recuperada; al confirmar también
       // se persiste para que el historial no conserve el total obsoleto.
-      totalPartidos: incluidos.length,
+      totalPartidos: sesion.estado === 'confirmada' ? sesion.totalPartidos : incluidos.length,
       bolillas: bolillas.map(b => ({ ...b, partido: b.partidoId ? porId.get(b.partidoId) ?? null : null })),
       partidos: incluidos,
     };
@@ -188,6 +247,195 @@ export class ProgramacionSemanalService {
     bolilla.ordenSorteo = null;
     await this.bolillas.save(bolilla);
     return this.detalle(id, usuario);
+  }
+
+  async obtenerVocalias(id: number, usuario: any) {
+    const detalle = await this.detalle(id, usuario);
+    if (detalle.estado !== 'confirmada') throw new BadRequestException('Primero debes confirmar la programación de horarios.');
+    const registros = await this.vocalias.find({ where: { programacionId: id } });
+    const orden = new Map((detalle.bolillas as ProgramacionBolilla[]).map((bolilla, indice) => [bolilla.partidoId, indice]));
+    registros.sort((a, b) => (orden.get(a.partidoId) ?? 9999) - (orden.get(b.partidoId) ?? 9999));
+    return {
+      estado: !registros.length ? 'sin_asignar' : registros.every(item => item.estado === 'confirmada') ? 'confirmada' : 'en_preparacion',
+      vocalias: registros,
+    };
+  }
+
+  async prepararVocalias(id: number, usuario: any) {
+    const actual = await this.obtenerVocalias(id, usuario);
+    if (actual.vocalias.length) return actual;
+    const detalle = await this.detalle(id, usuario);
+    const bolillasAsignadas = (detalle.bolillas as any[]).filter(bolilla => bolilla.partidoId && bolilla.partido);
+    if (!bolillasAsignadas.length) throw new BadRequestException('La programación confirmada no tiene partidos disponibles.');
+
+    const bloques = new Map<string, any[]>();
+    for (const bolilla of bolillasAsignadas) {
+      // La regla par/impar se evalúa sobre la programación completa del día,
+      // aunque existan varias canchas.
+      const clave = String(bolilla.fecha).slice(0, 10);
+      bloques.set(clave, [...(bloques.get(clave) ?? []), bolilla]);
+    }
+
+    const nuevos: VocaliaPartido[] = [];
+    for (const bloque of bloques.values()) {
+      bloque.sort((a, b) => `${a.hora}|${a.cancha}|${a.numero}`.localeCompare(`${b.hora}|${b.cancha}|${b.numero}`));
+      const cantidadImpar = bloque.length % 2 === 1;
+      for (let indice = 0; indice < bloque.length; indice += 1) {
+        let origen: any | undefined;
+        let regla: VocaliaPartido['reglaAsignacion'] = 'normal';
+        if (cantidadImpar && bloque.length >= 3 && indice >= bloque.length - 3) {
+          regla = 'cierre_tres';
+          if (indice === bloque.length - 3) origen = bloque[bloque.length - 1];
+          if (indice === bloque.length - 2) origen = bloque[bloque.length - 3];
+          if (indice === bloque.length - 1) origen = bloque[bloque.length - 2];
+        } else if (bloque.length > 1) {
+          // En una programación par, cada pareja de partidos intercambia sus
+          // vocales: 1 ↔ 2, 3 ↔ 4, etc. En una programación impar, esta regla
+          // se aplica hasta llegar al cierre especial de los tres últimos.
+          origen = bloque[indice % 2 === 0 ? indice + 1 : indice - 1];
+        }
+        nuevos.push(this.vocalias.create({
+          programacionId: id,
+          partidoId: bloque[indice].partidoId,
+          partidoOrigenId: origen?.partidoId ?? null,
+          tipoAsignacion: 'sorteo',
+          reglaAsignacion: regla,
+          equipoExtractorId: null,
+          resultadoBolilla: null,
+          equipoVocalId: null,
+          directivoNombre: null,
+          estado: 'pendiente',
+          creadoPor: usuario.id ?? null,
+        }));
+      }
+    }
+    await this.vocalias.save(nuevos);
+    return this.obtenerVocalias(id, usuario);
+  }
+
+  async reiniciarVocalias(id: number, usuario: any) {
+    const detalle = await this.detalle(id, usuario);
+    if (detalle.estado !== 'confirmada') throw new BadRequestException('Primero debes confirmar la programación de horarios.');
+    const existentes = await this.vocalias.find({ where: { programacionId: id } });
+    if (existentes.some(item => item.estado === 'confirmada')) {
+      throw new BadRequestException('Las vocalías confirmadas no se pueden regenerar.');
+    }
+    if (existentes.length) await this.vocalias.delete({ programacionId: id });
+    return this.prepararVocalias(id, usuario);
+  }
+
+  async configurarVocalia(id: number, vocaliaId: number, dto: ConfigurarVocaliaDto, usuario: any) {
+    const detalle = await this.detalle(id, usuario);
+    if (detalle.estado !== 'confirmada') throw new BadRequestException('La programación aún no está confirmada.');
+    const vocalia = await this.vocalias.findOne({ where: { id: vocaliaId, programacionId: id } });
+    if (!vocalia) throw new NotFoundException('Asignación de vocalía no encontrada.');
+    if (vocalia.estado === 'confirmada') throw new BadRequestException('Las vocalías confirmadas son de solo lectura.');
+
+    const partidos = detalle.partidos as Partido[];
+    const origen = dto.partidoOrigenId ? partidos.find(partido => partido.id === dto.partidoOrigenId) : undefined;
+    if (dto.partidoOrigenId && (!origen || origen.id === vocalia.partidoId)) {
+      throw new BadRequestException('El partido que proporciona la vocalía no es válido.');
+    }
+
+    const tipoAnterior = vocalia.tipoAsignacion;
+    const origenAnteriorId = vocalia.partidoOrigenId;
+    vocalia.tipoAsignacion = dto.tipoAsignacion;
+    if (dto.tipoAsignacion !== tipoAnterior || (dto.partidoOrigenId && dto.partidoOrigenId !== origenAnteriorId)) {
+      vocalia.reglaAsignacion = 'manual';
+    }
+    vocalia.partidoOrigenId = origen?.id ?? vocalia.partidoOrigenId;
+    vocalia.equipoExtractorId = null;
+    vocalia.resultadoBolilla = null;
+    vocalia.equipoVocalId = null;
+    vocalia.directivoNombre = null;
+    vocalia.estado = 'pendiente';
+
+    if (dto.tipoAsignacion === 'sorteo') {
+      if (!vocalia.partidoOrigenId) throw new BadRequestException('Selecciona el partido que proporcionará la vocalía.');
+    } else if (dto.tipoAsignacion === 'manual_equipo') {
+      if (!dto.equipoVocalId) throw new BadRequestException('Selecciona el equipo responsable de la vocalía.');
+      const equiposPermitidos = origen
+        ? [origen.equipoLocalId, origen.equipoVisitanteId]
+        : partidos.flatMap(partido => [partido.equipoLocalId, partido.equipoVisitanteId]);
+      if (!equiposPermitidos.includes(dto.equipoVocalId)) throw new BadRequestException('El equipo vocal no pertenece al partido seleccionado.');
+      this.validarDisponibilidadVocal(detalle, vocalia.partidoId, dto.equipoVocalId);
+      vocalia.equipoVocalId = dto.equipoVocalId;
+      vocalia.estado = 'asignada';
+    } else {
+      const nombre = dto.directivoNombre?.trim();
+      if (!nombre) throw new BadRequestException('Escribe el nombre del directivo responsable.');
+      vocalia.partidoOrigenId = null;
+      vocalia.directivoNombre = nombre;
+      vocalia.estado = 'asignada';
+    }
+
+    await this.vocalias.save(vocalia);
+    return this.obtenerVocalias(id, usuario);
+  }
+
+  async sortearVocalia(id: number, vocaliaId: number, equipoExtractorId: number, usuario: any) {
+    const detalle = await this.detalle(id, usuario);
+    const vocalia = await this.vocalias.findOne({ where: { id: vocaliaId, programacionId: id } });
+    if (!vocalia) throw new NotFoundException('Asignación de vocalía no encontrada.');
+    if (vocalia.estado === 'confirmada') throw new BadRequestException('Las vocalías confirmadas son de solo lectura.');
+    if (vocalia.tipoAsignacion !== 'sorteo' || !vocalia.partidoOrigen) throw new BadRequestException('Esta vocalía no está preparada para sorteo.');
+    const candidatos = [vocalia.partidoOrigen.equipoLocalId, vocalia.partidoOrigen.equipoVisitanteId];
+    if (!candidatos.includes(equipoExtractorId)) throw new BadRequestException('El equipo extractor no pertenece al partido de origen.');
+
+    const resultado: 'si' | 'no' = randomInt(2) === 0 ? 'si' : 'no';
+    const equipoVocalId = resultado === 'si' ? equipoExtractorId : candidatos.find(idEquipo => idEquipo !== equipoExtractorId)!;
+    this.validarDisponibilidadVocal(detalle, vocalia.partidoId, equipoVocalId);
+    vocalia.equipoExtractorId = equipoExtractorId;
+    vocalia.resultadoBolilla = resultado;
+    vocalia.equipoVocalId = equipoVocalId;
+    vocalia.estado = 'asignada';
+    await this.vocalias.save(vocalia);
+    return this.obtenerVocalias(id, usuario);
+  }
+
+  async liberarVocalia(id: number, vocaliaId: number, usuario: any) {
+    await this.detalle(id, usuario);
+    const vocalia = await this.vocalias.findOne({ where: { id: vocaliaId, programacionId: id } });
+    if (!vocalia) throw new NotFoundException('Asignación de vocalía no encontrada.');
+    if (vocalia.estado === 'confirmada') throw new BadRequestException('Las vocalías confirmadas son de solo lectura.');
+    vocalia.equipoExtractorId = null;
+    vocalia.resultadoBolilla = null;
+    vocalia.equipoVocalId = null;
+    vocalia.directivoNombre = null;
+    vocalia.estado = 'pendiente';
+    await this.vocalias.save(vocalia);
+    return this.obtenerVocalias(id, usuario);
+  }
+
+  async confirmarVocalias(id: number, usuario: any) {
+    const detalle = await this.detalle(id, usuario);
+    const registros = await this.vocalias.find({ where: { programacionId: id } });
+    if (!registros.length || registros.length !== detalle.partidos.length) throw new BadRequestException('Prepara todas las vocalías antes de confirmar.');
+    if (registros.some(item => item.estado !== 'asignada')) throw new BadRequestException('Todavía existen partidos sin vocal asignado.');
+    for (const vocalia of registros) {
+      if (vocalia.tipoAsignacion === 'directivo') {
+        if (!vocalia.directivoNombre?.trim()) throw new BadRequestException('Falta identificar un directivo responsable.');
+      } else if (!vocalia.equipoVocalId) {
+        throw new BadRequestException('Falta seleccionar un equipo vocal.');
+      } else {
+        this.validarDisponibilidadVocal(detalle, vocalia.partidoId, vocalia.equipoVocalId);
+      }
+    }
+    const confirmadoEn = new Date();
+    await this.vocalias.update({ programacionId: id }, { estado: 'confirmada', confirmadoEn });
+    return this.obtenerVocalias(id, usuario);
+  }
+
+  private validarDisponibilidadVocal(detalle: any, partidoId: number, equipoId: number): void {
+    const objetivo = detalle.bolillas.find((bolilla: any) => bolilla.partidoId === partidoId);
+    if (!objetivo) throw new BadRequestException('No se encontró el horario del partido.');
+    const conflicto = detalle.bolillas.find((bolilla: any) =>
+      bolilla.partidoId
+      && String(bolilla.fecha).slice(0, 10) === String(objetivo.fecha).slice(0, 10)
+      && bolilla.hora === objetivo.hora
+      && (bolilla.partido?.equipoLocalId === equipoId || bolilla.partido?.equipoVisitanteId === equipoId),
+    );
+    if (conflicto) throw new BadRequestException('El equipo seleccionado está jugando a la misma fecha y hora.');
   }
 
   private async partidosElegibles(dto: CrearProgramacionSemanalDto): Promise<Partido[]> {

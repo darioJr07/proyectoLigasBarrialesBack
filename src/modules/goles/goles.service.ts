@@ -5,6 +5,7 @@ import { Gol } from './entities/gol.entity';
 import { CreateGolDto } from './dto/create-gol.dto';
 import { Partido } from '../partidos/entities/partido.entity';
 import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
+import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
 
 /**
  * Fila de la tabla de goleadores para un jugador.
@@ -28,6 +29,8 @@ export class GolesService {
     private readonly golesRepository: Repository<Gol>,
     @InjectRepository(JugadorCampeonato)
     private readonly jugadorCampeonatoRepository: Repository<JugadorCampeonato>,
+    @InjectRepository(Inscripcion)
+    private readonly inscripcionesRepository: Repository<Inscripcion>,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -134,14 +137,27 @@ export class GolesService {
   ): Promise<FilaGoleador[]> {
     const goles = await this.golesRepository.find({
       where: { campeonatoId, categoriaId, activo: true },
-      relations: ['jugador', 'equipo'],
+      relations: ['jugador', 'jugador.equipo', 'equipo'],
+      order: { id: 'ASC' },
     });
 
     // Mapa jugadorId → fila de estadísticas
     const mapa = new Map<number, Omit<FilaGoleador, 'posicion'>>();
+    const equipoActualJugador = new Map<number, { id: number; nombre: string }>();
+    const ultimoEquipoAnotador = new Map<number, { id: number; nombre: string }>();
 
     for (const gol of goles) {
       const key = gol.jugadorId;
+
+      if (gol.jugador?.equipoId && gol.jugador.equipo) {
+        equipoActualJugador.set(key, {
+          id: gol.jugador.equipoId,
+          nombre: gol.jugador.equipo.nombre,
+        });
+      }
+      if (gol.tipo !== 'autogol' && gol.equipo) {
+        ultimoEquipoAnotador.set(key, { id: gol.equipo.id, nombre: gol.equipo.nombre });
+      }
 
       if (!mapa.has(key)) {
         mapa.set(key, {
@@ -173,14 +189,60 @@ export class GolesService {
     const jugadorIds = Array.from(mapa.keys());
     const habilitaciones = jugadorIds.length > 0
       ? await this.jugadorCampeonatoRepository.find({
-          where: { campeonatoId, jugadorId: In(jugadorIds) },
-          select: ['jugadorId', 'numeroCancha'],
+          where: {
+            campeonatoId,
+            categoriaId,
+            jugadorId: In(jugadorIds),
+            activo: true,
+            estado: 'habilitado',
+          },
+          relations: ['equipo'],
           order: { id: 'ASC' },
         })
       : [];
-    const numMap = new Map<number, number | null>(
-      habilitaciones.map((h) => [h.jugadorId, h.numeroCancha ?? null]),
+    const habilitacionActual = new Map<number, JugadorCampeonato>();
+    for (const habilitacion of habilitaciones) {
+      habilitacionActual.set(habilitacion.jugadorId, habilitacion);
+    }
+
+    const idsEquiposActuales = Array.from(new Set(
+      Array.from(equipoActualJugador.values()).map((equipo) => equipo.id),
+    ));
+    const inscripcionesActuales = idsEquiposActuales.length > 0
+      ? await this.inscripcionesRepository.find({
+          where: {
+            campeonatoId,
+            categoriaId,
+            equipoId: In(idsEquiposActuales),
+            estado: 'confirmada',
+            activo: true,
+          },
+          select: ['equipoId'],
+        })
+      : [];
+    const equiposInscritosEnCategoria = new Set(
+      inscripcionesActuales.map((inscripcion) => inscripcion.equipoId),
     );
+
+    for (const fila of mapa.values()) {
+      const habilitacion = habilitacionActual.get(fila.jugadorId);
+      const equipoJugador = equipoActualJugador.get(fila.jugadorId);
+      const ultimoEquipo = ultimoEquipoAnotador.get(fila.jugadorId);
+
+      if (habilitacion?.equipo) {
+        fila.equipoId = habilitacion.equipoId;
+        fila.equipoNombre = habilitacion.equipo.nombre;
+        fila.numeroCancha = habilitacion.numeroCancha ?? null;
+      } else if (equipoJugador && equiposInscritosEnCategoria.has(equipoJugador.id)) {
+        fila.equipoId = equipoJugador.id;
+        fila.equipoNombre = equipoJugador.nombre;
+        fila.numeroCancha = null;
+      } else if (ultimoEquipo) {
+        fila.equipoId = ultimoEquipo.id;
+        fila.equipoNombre = ultimoEquipo.nombre;
+        fila.numeroCancha = null;
+      }
+    }
 
     // Ordenar: total DESC, luego nombre ASC
     const lista = Array.from(mapa.values()).sort((a, b) => {
@@ -192,7 +254,7 @@ export class GolesService {
     return lista.map((fila, index) => ({
       posicion: index + 1,
       ...fila,
-      numeroCancha: numMap.get(fila.jugadorId) ?? null,
+      numeroCancha: fila.numeroCancha,
     }));
   }
 

@@ -38,7 +38,17 @@ Para el estado funcional completo del sistema, revisar [../ESTADO_ACTUAL_PROYECT
 - `recibos-tesoreria`: emisión, consulta y reimpresión de recibos persistentes numerados por liga y año.
 - `garantias`: garantias y prestamos del fondo.
 - `derramas`: derramas colectivas y deudas.
-- `configuracion`: configuraciones del sistema.
+- `configuracion`: configuraciones del sistema y guard autoritativo para cerrar Jugadores, Inscripciones/Habilitaciones y Transferencias a dirigentes.
+
+## Cierre operativo de módulos
+
+Las claves `modulo_jugadores`, `modulo_inscripciones` y `modulo_transferencias` se aplican en el backend mediante `ModuloHabilitadoGuard` y el decorador `@ModuloHabilitado(...)`.
+
+- Solo restringen a `dirigente_equipo`; `master` y `directivo_liga` mantienen acceso administrativo.
+- Se protegen las operaciones de escritura de jugadores, inscripciones/habilitaciones y transferencias que puede ejecutar un dirigente.
+- El valor se consulta en la base de datos en cada operación protegida. Una sesión o formulario abierto antes del cierre no permite guardar después de deshabilitar el módulo.
+- Un módulo cerrado responde HTTP `403`.
+- No se requirió migración: se reutiliza la tabla `configuracion_sistema` y sus claves existentes.
 
 ## Instalacion
 
@@ -78,6 +88,24 @@ En produccion se recomienda:
 - Usar `USE_CLOUDINARY=true` si el servidor no conserva archivos locales.
 - Revisar cuidadosamente `DB_SYNCHRONIZE`.
 
+## Despliegue vigente en Render
+
+Configuración validada el 15/10/2026 para el repositorio independiente del backend y el plan gratuito de Render:
+
+```text
+Root Directory: (vacío)
+Build Command: npm ci --include=dev && npm run build
+Start Command: npm run start:prod
+NODE_ENV=production
+NODE_OPTIONS=--max-old-space-size=384
+```
+
+El build incluye las `devDependencies` porque `@nestjs/cli` y TypeScript son necesarios para generar `dist`. El arranque productivo no vuelve a compilar: ejecuta `node dist/main` mediante `npm run start:prod`.
+
+Si se cambia la configuración, ejecutar **Manual Deploy → Clear build cache & deploy**. No configurar `Root Directory=backend` cuando Render está conectado directamente al repositorio `proyectoLigasBarrialesBack`, porque esa subcarpeta no existe dentro de dicho repositorio.
+
+La combinación anterior corrigió los errores `JavaScript heap out of memory`, `nest: not found` y `Root directory "backend" does not exist` encontrados durante el despliegue.
+
 ## Inicializacion Automatica
 
 El backend puede crear datos base al arrancar:
@@ -109,18 +137,20 @@ npm run test:cov
 
 ## Testing
 
-Existe una primera cobertura automatizada para los flujos críticos de jugadores, habilitaciones y transferencias:
+Existe una primera cobertura automatizada para los flujos críticos de jugadores, habilitaciones, transferencias, usuarios y cierre operativo:
 
 - `jugadores.service.spec.ts`: alcance de Master, directivo y dirigente.
 - `jugador-campeonatos.service.spec.ts`: acceso por campeonato, reutilización de rechazos y revalidación de cupo.
 - `transferencias.service.spec.ts`: bloqueo de solicitudes simultáneas, historial de rechazos y conclusión transaccional.
-- Resultado del 15/10/2026: 3 suites y 12 pruebas aprobadas.
+- `usuarios.service.spec.ts`: permisos de cambio de contraseña según usuario y rol.
+- `modulo-habilitado.guard.spec.ts`: bypass administrativo y permiso/bloqueo del dirigente según la configuración vigente.
+- Resultado del 15/10/2026: 5 suites y 22 pruebas aprobadas.
 - Las pruebas usan mocks; no acceden a la base de datos y `tsconfig.build.json` excluye `**/*spec.ts` del build productivo.
 
-Ejecución enfocada:
+Ejecución completa:
 
 ```bash
-npm test -- --runInBand jugadores.service.spec.ts jugador-campeonatos.service.spec.ts transferencias.service.spec.ts
+npm test -- --runInBand
 ```
 
 La cobertura integral y E2E continúa como mejora futura.

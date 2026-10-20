@@ -12,9 +12,11 @@ import { TablaPosicionesModule } from '../tabla-posiciones/tabla-posiciones.modu
 import { GolesModule } from '../goles/goles.module';
 import { PublicoController } from './publico.controller';
 import { PublicoService } from './publico.service';
+import { EtapaCompetencia } from '../partidos/entities/etapa-competencia.entity';
+import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Liga, Campeonato, Categoria, Equipo, Partido, Sancion, ReglaSancion, Jugador]), TablaPosicionesModule, GolesModule],
+  imports: [TypeOrmModule.forFeature([Liga, Campeonato, Categoria, Equipo, Partido, Sancion, ReglaSancion, Jugador, EtapaCompetencia, JugadorCampeonato]), TablaPosicionesModule, GolesModule],
   controllers: [PublicoController],
   providers: [PublicoService],
 })

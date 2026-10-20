@@ -19,6 +19,8 @@ import { RechazarHabilitacionDto } from './dto/rechazar-habilitacion.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { ModuloHabilitado } from '../configuracion/decorators/modulo-habilitado.decorator';
+import { ModuloHabilitadoGuard } from '../configuracion/guards/modulo-habilitado.guard';
 
 @Controller('jugador-campeonatos')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -27,6 +29,8 @@ export class JugadorCampeonatosController {
 
   @Post()
   @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @UseGuards(ModuloHabilitadoGuard)
+  @ModuloHabilitado('modulo_inscripciones')
   create(@Body() createDto: CreateJugadorCampeonatoDto, @Request() req: any) {
     return this.jugadorCampeonatosService.create(createDto, req.user);
   }
@@ -104,6 +108,8 @@ export class JugadorCampeonatosController {
 
   @Patch(':id')
   @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  @UseGuards(ModuloHabilitadoGuard)
+  @ModuloHabilitado('modulo_inscripciones')
   update(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateDto: UpdateJugadorCampeonatoDto,

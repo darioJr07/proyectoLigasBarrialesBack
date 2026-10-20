@@ -16,6 +16,8 @@ import { UpdateJugadorDto } from './dto/update-jugador.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { ModuloHabilitado } from '../configuracion/decorators/modulo-habilitado.decorator';
+import { ModuloHabilitadoGuard } from '../configuracion/guards/modulo-habilitado.guard';
 
 /**
  * Controlador de jugadores
@@ -28,6 +30,8 @@ export class JugadoresController {
   constructor(private readonly jugadoresService: JugadoresService) {}
 
   @Post()
+  @UseGuards(ModuloHabilitadoGuard)
+  @ModuloHabilitado('modulo_jugadores')
   create(@Body() createJugadorDto: CreateJugadorDto, @Request() req: any) {
     return this.jugadoresService.create(
       createJugadorDto,
@@ -62,6 +66,8 @@ export class JugadoresController {
   }
 
   @Patch(':id')
+  @UseGuards(ModuloHabilitadoGuard)
+  @ModuloHabilitado('modulo_jugadores')
   update(
     @Param('id') id: string,
     @Body() updateJugadorDto: UpdateJugadorDto,
@@ -78,6 +84,8 @@ export class JugadoresController {
   }
 
   @Delete(':id')
+  @UseGuards(ModuloHabilitadoGuard)
+  @ModuloHabilitado('modulo_jugadores')
   remove(@Param('id') id: string, @Request() req: any) {
     return this.jugadoresService.remove(+id, req.user.role, req.user.ligaId);
   }

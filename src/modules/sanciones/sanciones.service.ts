@@ -46,6 +46,102 @@ export class SancionesService {
     private campeonatoRepo: Repository<Campeonato>,
   ) {}
 
+  /**
+   * Una sancion individual conserva sancion.equipoId como dato historico y
+   * responsable economico. Para el cumplimiento deportivo se utiliza la
+   * habilitacion vigente del jugador en el campeonato.
+   */
+  private async obtenerHabilitacionesVigentes(
+    campeonatoId: number,
+    equipoIds?: number[],
+    manager?: EntityManager,
+  ): Promise<JugadorCampeonato[]> {
+    const repo = manager?.getRepository(JugadorCampeonato) ?? this.jugadorCampeonatoRepo;
+    if (equipoIds && equipoIds.length === 0) return [];
+
+    return repo.find({
+      where: {
+        campeonatoId,
+        ...(equipoIds ? { equipoId: In(equipoIds) } : {}),
+        estado: 'habilitado',
+        activo: true,
+      },
+      relations: ['equipo'],
+      order: { id: 'ASC' },
+    });
+  }
+
+  private sancionTemporalVencida(sancion: Sancion): boolean {
+    if (!sancion.fechaFinSuspension) return false;
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const fin = new Date(`${String(sancion.fechaFinSuspension).slice(0, 10)}T00:00:00`);
+    return fin < hoy;
+  }
+
+  private fechaISO(valor: Date | string): string {
+    return valor instanceof Date
+      ? valor.toISOString().slice(0, 10)
+      : String(valor).slice(0, 10);
+  }
+
+  private async obtenerSuspensionesVigentesDeEquipos(
+    campeonatoId: number,
+    equipoIds: number[],
+    manager?: EntityManager,
+  ): Promise<Sancion[]> {
+    const sancionRepo = manager?.getRepository(Sancion) ?? this.sancionRepo;
+    const habilitaciones = await this.obtenerHabilitacionesVigentes(campeonatoId, equipoIds, manager);
+    const jugadorIds = [...new Set(habilitaciones.map((item) => item.jugadorId))];
+    if (!jugadorIds.length) return [];
+
+    const suspensiones = await sancionRepo.find({
+      where: {
+        campeonatoId,
+        jugadorId: In(jugadorIds),
+        suspensionActiva: true,
+        activo: true,
+      },
+    });
+    const vencidas = suspensiones.filter((sancion) => this.sancionTemporalVencida(sancion));
+    if (vencidas.length) {
+      for (const sancion of vencidas) sancion.suspensionActiva = false;
+      await sancionRepo.save(vencidas);
+    }
+    return suspensiones.filter((sancion) => !this.sancionTemporalVencida(sancion));
+  }
+
+  private async agregarEquipoActual(sanciones: Sancion[]): Promise<Sancion[]> {
+    const campeonatos = [...new Set(sanciones.filter((s) => !!s.jugadorId).map((s) => s.campeonatoId))];
+    if (!campeonatos.length) return sanciones;
+
+    const jugadorIds = [...new Set(sanciones.filter((s) => !!s.jugadorId).map((s) => s.jugadorId))];
+    const habilitaciones = await this.jugadorCampeonatoRepo.find({
+      where: {
+        jugadorId: In(jugadorIds),
+        campeonatoId: In(campeonatos),
+        estado: 'habilitado',
+        activo: true,
+      },
+      relations: ['equipo'],
+      order: { id: 'ASC' },
+    });
+    const actuales = new Map<string, JugadorCampeonato>();
+    for (const habilitacion of habilitaciones) {
+      actuales.set(`${habilitacion.jugadorId}-${habilitacion.campeonatoId}`, habilitacion);
+    }
+
+    for (const sancion of sanciones) {
+      if (!sancion.jugadorId) continue;
+      const actual = actuales.get(`${sancion.jugadorId}-${sancion.campeonatoId}`);
+      (sancion as any).equipoActual = actual?.equipo ?? null;
+      (sancion as any).equipoActualId = actual?.equipoId ?? null;
+      (sancion as any).numeroCanchaActual = actual?.numeroCancha ?? null;
+      (sancion as any).equipoTransferido = !!actual && actual.equipoId !== sancion.equipoId;
+    }
+    return sanciones;
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // TIPOS DE SANCIÓN
   // ─────────────────────────────────────────────────────────────────────────
@@ -362,7 +458,15 @@ export class SancionesService {
     if (usuario.role === 'directivo_liga') {
       query.andWhere('sancion.liga_id = :ligaId', { ligaId: usuario.ligaId });
     } else if (usuario.role === 'dirigente_equipo') {
-      query.andWhere('sancion.equipo_id = :equipoId', { equipoId: usuario.equipoId });
+      query.andWhere(
+        '(sancion.equipo_id = :equipoId OR EXISTS (' +
+        ' SELECT 1 FROM jugador_campeonatos jc_actual' +
+        ' WHERE jc_actual.jugador_id = sancion.jugador_id' +
+        ' AND jc_actual.campeonato_id = sancion.campeonato_id' +
+        ' AND jc_actual.equipo_id = :equipoId' +
+        " AND jc_actual.estado = 'habilitado' AND jc_actual.activo = true))",
+        { equipoId: usuario.equipoId },
+      );
     }
 
     if (filtros.campeonatoId) {
@@ -375,7 +479,15 @@ export class SancionesService {
       query.andWhere('sancion.jugador_id = :jugadorId', { jugadorId: filtros.jugadorId });
     }
     if (filtros.equipoId) {
-      query.andWhere('sancion.equipo_id = :equipoId', { equipoId: filtros.equipoId });
+      query.andWhere(
+        '(sancion.equipo_id = :filtroEquipoId OR EXISTS (' +
+        ' SELECT 1 FROM jugador_campeonatos jc_filtro' +
+        ' WHERE jc_filtro.jugador_id = sancion.jugador_id' +
+        ' AND jc_filtro.campeonato_id = sancion.campeonato_id' +
+        ' AND jc_filtro.equipo_id = :filtroEquipoId' +
+        " AND jc_filtro.estado = 'habilitado' AND jc_filtro.activo = true))",
+        { filtroEquipoId: filtros.equipoId },
+      );
     }
     if (filtros.tipoSancionId) {
       query.andWhere('sancion.tipo_sancion_id = :tipoId', { tipoId: filtros.tipoSancionId });
@@ -394,10 +506,11 @@ export class SancionesService {
       .getRawAndEntities();
 
     // Mapear numeroCanchaCalificacion desde los raw results (viene del LEFT JOIN a jugador_campeonatos)
-    return entities.map((sancion, i) => {
+    const resultado = entities.map((sancion, i) => {
       (sancion as any).numeroCanchaCalificacion = raw[i]?.numeroCanchaCalificacion ?? null;
       return sancion;
     }) as Sancion[];
+    return this.agregarEquipoActual(resultado);
   }
 
   /**
@@ -405,10 +518,11 @@ export class SancionesService {
    * Se usa para mostrar el badge de suspensión al cargar un partido.
    */
   async sancionesActivasJugador(jugadorId: number): Promise<Sancion[]> {
-    return this.sancionRepo.find({
+    const sanciones = await this.sancionRepo.find({
       where: { jugadorId, suspensionActiva: true, activo: true },
       order: { creadoEn: 'DESC' },
     });
+    return sanciones.filter((sancion) => !this.sancionTemporalVencida(sancion));
   }
 
   /** Historial de solo lectura que explica el avance de una suspensión por partidos. */
@@ -419,7 +533,18 @@ export class SancionesService {
       throw new ForbiddenException('No tienes acceso a esta sanción.');
     }
     if (usuario.role === 'dirigente_equipo' && sancion.equipoId !== usuario.equipoId) {
-      throw new ForbiddenException('No tienes acceso a esta sanción.');
+      const habilitacionActual = sancion.jugadorId
+        ? await this.jugadorCampeonatoRepo.findOne({
+            where: {
+              jugadorId: sancion.jugadorId,
+              campeonatoId: sancion.campeonatoId,
+              equipoId: usuario.equipoId,
+              estado: 'habilitado',
+              activo: true,
+            },
+          })
+        : null;
+      if (!habilitacionActual) throw new ForbiddenException('No tienes acceso a esta sanción.');
     }
 
     const relations = ['partido', 'partido.equipoLocal', 'partido.equipoVisitante'];
@@ -725,13 +850,13 @@ export class SancionesService {
     const actaRepo = manager?.getRepository(ActaAlineacion) ?? this.actaAlineacionRepo;
     const cumplidoRepo = manager?.getRepository(SancionPartidoCumplido) ?? this.sancionPartidoCumplidoRepo;
     const excluidoRepo = manager?.getRepository(SancionPartidoExcluido) ?? this.sancionPartidoExcluidoRepo;
-    // Buscar suspensiones activas de ambos equipos en este campeonato
-    const suspensiones = await sancionRepo.find({
-      where: [
-        { campeonatoId, equipoId: equipoLocalId,     suspensionActiva: true, activo: true },
-        { campeonatoId, equipoId: equipoVisitanteId, suspensionActiva: true, activo: true },
-      ],
-    });
+    // sancion.equipoId conserva el origen. El cumplimiento sigue al jugador
+    // habilitado actualmente en cualquiera de los dos equipos del partido.
+    const suspensiones = await this.obtenerSuspensionesVigentesDeEquipos(
+      campeonatoId,
+      [equipoLocalId, equipoVisitanteId],
+      manager,
+    );
 
     // Cargar la planilla del partido para verificar si el jugador realmente jugó
     const planilla = await actaRepo.find({ where: { partidoId } });
@@ -747,6 +872,7 @@ export class SancionesService {
 
     for (const s of suspensiones) {
       if (!s.jugadorId) continue; // sanciones colectivas no tienen counter individual
+      if (!s.partidosSuspension || s.fechaFinSuspension) continue;
 
       const yaContabilizado = await cumplidoRepo.findOne({
         where: { sancionId: s.id, partidoId },
@@ -776,15 +902,7 @@ export class SancionesService {
       }
     }
 
-    // Desactivar también suspensiones por tiempo cuya fecha de fin ya pasó
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    for (const s of suspensiones) {
-      if (s.suspensionActiva && s.fechaFinSuspension && new Date(s.fechaFinSuspension) < hoy) {
-        s.suspensionActiva = false;
-      }
-    }
-
+    // Las temporales vencidas ya fueron cerradas por el helper y no llegan aquí.
     await sancionRepo.save(suspensiones);
   }
 
@@ -802,9 +920,11 @@ export class SancionesService {
     const sancionRepo = manager?.getRepository(Sancion) ?? this.sancionRepo;
     const cumplidoRepo = manager?.getRepository(SancionPartidoCumplido) ?? this.sancionPartidoCumplidoRepo;
     const excluidoRepo = manager?.getRepository(SancionPartidoExcluido) ?? this.sancionPartidoExcluidoRepo;
-    const suspensiones = await sancionRepo.find({
-      where: { campeonatoId, equipoId: equipoRivalId, suspensionActiva: true, activo: true },
-    });
+    const suspensiones = await this.obtenerSuspensionesVigentesDeEquipos(
+      campeonatoId,
+      [equipoRivalId],
+      manager,
+    );
 
     for (const sancion of suspensiones) {
       // Solo suspensión individual por número de partidos. Las sanciones por
@@ -840,13 +960,20 @@ export class SancionesService {
   ): Promise<void> {
     const sancionRepo = manager?.getRepository(Sancion) ?? this.sancionRepo;
     const cumplidoRepo = manager?.getRepository(SancionPartidoCumplido) ?? this.sancionPartidoCumplidoRepo;
+    const habilitaciones = await this.obtenerHabilitacionesVigentes(
+      campeonatoId,
+      [equipoExpulsadoId],
+      manager,
+    );
+    const jugadorIds = [...new Set(habilitaciones.map((item) => item.jugadorId))];
+    if (!jugadorIds.length) return;
+
     const registros = await cumplidoRepo
       .createQueryBuilder('cumplido')
       .innerJoinAndSelect('cumplido.sancion', 'sancion')
       .where('cumplido.partido_id = :partidoId', { partidoId })
       .andWhere('sancion.campeonato_id = :campeonatoId', { campeonatoId })
-      .andWhere('sancion.equipo_id = :equipoExpulsadoId', { equipoExpulsadoId })
-      .andWhere('sancion.jugador_id IS NOT NULL')
+      .andWhere('sancion.jugador_id IN (:...jugadorIds)', { jugadorIds })
       .andWhere('sancion.partidos_suspension > 0')
       .andWhere('sancion.fecha_fin_suspension IS NULL')
       .getMany();
@@ -881,12 +1008,13 @@ export class SancionesService {
     const excluidos = manager?.getRepository(SancionPartidoExcluido) ?? this.sancionPartidoExcluidoRepo;
     const planilla = await actas.find({ where: { partidoId } });
     if (!planilla.length) return;
-    const activas = await sanciones.find({ where: [
-      { campeonatoId, equipoId: equipoLocalId, suspensionActiva: true, activo: true },
-      { campeonatoId, equipoId: equipoVisitanteId, suspensionActiva: true, activo: true },
-    ] });
+    const activas = await this.obtenerSuspensionesVigentesDeEquipos(
+      campeonatoId,
+      [equipoLocalId, equipoVisitanteId],
+      manager,
+    );
     for (const sancion of activas) {
-      if (!sancion.jugadorId) continue;
+      if (!sancion.jugadorId || !sancion.partidosSuspension || sancion.fechaFinSuspension) continue;
       const registro = planilla.find(item => item.jugadorId === sancion.jugadorId);
       if (registro?.estado !== 'suspendido') continue;
       if (await cumplidos.findOne({ where: { sancionId: sancion.id, partidoId } })) continue;
@@ -907,24 +1035,35 @@ export class SancionesService {
       where: { campeonatoId, suspensionActiva: true, activo: true },
       relations: ['jugador', 'equipo'],
     });
+    const habilitaciones = await this.obtenerHabilitacionesVigentes(campeonatoId);
+    const habilitacionPorJugador = new Map<number, JugadorCampeonato>();
+    for (const habilitacion of habilitaciones) {
+      habilitacionPorJugador.set(habilitacion.jugadorId, habilitacion);
+    }
     const propuestas: any[] = [];
     for (const sancion of sanciones) {
-      if (!sancion.jugadorId || !sancion.equipoId || !sancion.partidosSuspension) continue;
+      if (!sancion.jugadorId || !sancion.partidosSuspension || sancion.fechaFinSuspension) continue;
+      const habilitacionActual = habilitacionPorJugador.get(sancion.jugadorId);
+      if (!habilitacionActual) continue;
+      const equipoCumplimientoId = habilitacionActual.equipoId;
       const partidos = await this.partidoRepo.find({ where: [
-        { campeonatoId, equipoLocalId: sancion.equipoId, estado: 'jugado', activo: true },
-        { campeonatoId, equipoVisitanteId: sancion.equipoId, estado: 'jugado', activo: true },
+        { campeonatoId, equipoLocalId: equipoCumplimientoId, estado: 'jugado', activo: true },
+        { campeonatoId, equipoVisitanteId: equipoCumplimientoId, estado: 'jugado', activo: true },
       ] });
       const excluidos = await this.sancionPartidoExcluidoRepo.find({ where: { sancionId: sancion.id } });
       const cumplidos = await this.sancionPartidoCumplidoRepo.find({ where: { sancionId: sancion.id } });
       const ignorar = new Set([...excluidos, ...cumplidos].map((item) => item.partidoId));
       for (const partido of partidos) {
         if (ignorar.has(partido.id)) continue;
+        const inicioHabilitacion = habilitacionActual.fechaAprobacion ?? habilitacionActual.fechaInscripcion;
+        if (partido.fechaPartido && inicioHabilitacion &&
+            String(partido.fechaPartido).slice(0, 10) < this.fechaISO(inicioHabilitacion)) continue;
         const planilla = await this.actaAlineacionRepo.findOne({ where: { partidoId: partido.id, jugadorId: sancion.jugadorId } });
         if (planilla?.estado === 'jugo' || planilla?.estado === 'expulsado') continue;
         propuestas.push({
           sancionId: sancion.id,
           jugador: sancion.jugador?.nombre ?? `Jugador #${sancion.jugadorId}`,
-          equipo: sancion.equipo?.nombre ?? `Equipo #${sancion.equipoId}`,
+          equipo: habilitacionActual.equipo?.nombre ?? `Equipo #${equipoCumplimientoId}`,
           partidoId: partido.id,
           jornada: partido.jornada,
           fechaPartido: partido.fechaPartido,
@@ -953,8 +1092,26 @@ export class SancionesService {
       for (const propuesta of dto.propuestas) {
         const sancion = await sanciones.findOne({ where: { id: propuesta.sancionId, activo: true, suspensionActiva: true } });
         const partido = await partidos.findOne({ where: { id: propuesta.partidoId, activo: true, estado: 'jugado' } });
-        if (!sancion || !partido || !sancion.jugadorId || !sancion.equipoId || sancion.campeonatoId !== partido.campeonatoId || (partido.equipoLocalId !== sancion.equipoId && partido.equipoVisitanteId !== sancion.equipoId)) {
+        if (!sancion || !partido || !sancion.jugadorId || !sancion.partidosSuspension || sancion.fechaFinSuspension || sancion.campeonatoId !== partido.campeonatoId) {
           omitidas.push({ ...propuesta, motivo: 'La sanción o el partido ya no son elegibles.' }); continue;
+        }
+        const habilitacionActual = await manager.getRepository(JugadorCampeonato).findOne({
+          where: {
+            jugadorId: sancion.jugadorId,
+            campeonatoId: sancion.campeonatoId,
+            estado: 'habilitado',
+            activo: true,
+          },
+          order: { id: 'DESC' },
+        });
+        if (!habilitacionActual ||
+            (partido.equipoLocalId !== habilitacionActual.equipoId && partido.equipoVisitanteId !== habilitacionActual.equipoId)) {
+          omitidas.push({ ...propuesta, motivo: 'El partido no corresponde al equipo actual del jugador.' }); continue;
+        }
+        const inicioHabilitacion = habilitacionActual.fechaAprobacion ?? habilitacionActual.fechaInscripcion;
+        if (partido.fechaPartido && inicioHabilitacion &&
+            String(partido.fechaPartido).slice(0, 10) < this.fechaISO(inicioHabilitacion)) {
+          omitidas.push({ ...propuesta, motivo: 'El partido es anterior a la habilitacion actual del jugador.' }); continue;
         }
         if (await cumplidos.findOne({ where: { sancionId: sancion.id, partidoId: partido.id } }) || await excluidos.findOne({ where: { sancionId: sancion.id, partidoId: partido.id } })) {
           omitidas.push({ ...propuesta, motivo: 'El partido ya fue contabilizado o está excluido.' }); continue;

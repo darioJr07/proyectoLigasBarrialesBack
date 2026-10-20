@@ -33,8 +33,14 @@ export class PublicoController {
     @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
     @Query('categoriaId', ParseIntPipe) categoriaId: number,
     @Query('etapa') etapa: string,
+    @Query('grupoId') grupoId?: string,
   ) {
-    return this.publicoService.consultarPosiciones(campeonatoId, categoriaId, etapa);
+    return this.publicoService.consultarPosiciones(
+      campeonatoId,
+      categoriaId,
+      etapa,
+      grupoId ? Number(grupoId) : undefined,
+    );
   }
 
   @Get('partidos/etapas')
@@ -43,6 +49,14 @@ export class PublicoController {
     @Query('categoriaId', ParseIntPipe) categoriaId: number,
   ) {
     return this.publicoService.listarEtapas(campeonatoId, categoriaId);
+  }
+
+  @Get('partidos/etapas-detalle')
+  listarEtapasDetalle(
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Query('categoriaId', ParseIntPipe) categoriaId: number,
+  ) {
+    return this.publicoService.listarEtapasDetalle(campeonatoId, categoriaId);
   }
 
   @Get('partidos/jornadas')

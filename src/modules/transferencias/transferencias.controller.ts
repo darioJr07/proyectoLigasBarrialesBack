@@ -17,6 +17,8 @@ import { RechazarTransferenciaDto } from './dto/rechazar-transferencia.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { ModuloHabilitado } from '../configuracion/decorators/modulo-habilitado.decorator';
+import { ModuloHabilitadoGuard } from '../configuracion/guards/modulo-habilitado.guard';
 
 @Controller('transferencias')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -25,6 +27,8 @@ export class TransferenciasController {
 
   @Post()
   @Roles('master', 'dirigente_equipo')
+  @UseGuards(ModuloHabilitadoGuard)
+  @ModuloHabilitado('modulo_transferencias')
   create(@Body() createDto: CreateTransferenciaDto, @Request() req: any) {
     return this.transferenciasService.create(createDto, req.user);
   }
@@ -70,6 +74,8 @@ export class TransferenciasController {
 
   @Patch(':id/aprobar-equipo-origen')
   @Roles('master', 'dirigente_equipo')
+  @UseGuards(ModuloHabilitadoGuard)
+  @ModuloHabilitado('modulo_transferencias')
   aprobarPorEquipoOrigen(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: AprobarTransferenciaDto,
@@ -80,6 +86,8 @@ export class TransferenciasController {
 
   @Patch(':id/rechazar-equipo-origen')
   @Roles('master', 'dirigente_equipo')
+  @UseGuards(ModuloHabilitadoGuard)
+  @ModuloHabilitado('modulo_transferencias')
   rechazarPorEquipoOrigen(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: RechazarTransferenciaDto,
@@ -110,6 +118,8 @@ export class TransferenciasController {
 
   @Delete(':id')
   @Roles('master', 'dirigente_equipo')
+  @UseGuards(ModuloHabilitadoGuard)
+  @ModuloHabilitado('modulo_transferencias')
   cancelar(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
     return this.transferenciasService.cancelar(id, req.user);
   }

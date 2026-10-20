@@ -20,6 +20,8 @@ import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ProgramacionSemanalService } from './programacion-semanal.service';
 import { CrearProgramacionSemanalDto } from './dto/crear-programacion-semanal.dto';
+import { GenerarFixtureDto } from './dto/generar-fixture.dto';
+import { ConfigurarVocaliaDto, SortearVocaliaDto } from './dto/vocalia-programacion.dto';
 
 /**
  * Controlador de Partidos
@@ -65,6 +67,25 @@ export class PartidosController {
     return this.programacionSemanalService.pendiente(campeonatoId, categoriaId ? Number(categoriaId) : undefined, etapa, jornada, req.user);
   }
 
+  @Get('programacion-semanal/confirmadas')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  programacionesSemanalesConfirmadas(
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Query('categoriaId') categoriaId: string | undefined,
+    @Query('etapa') etapa: string | undefined,
+    @Query('jornada') jornada: string | undefined,
+    @Request() req: any,
+  ) {
+    return this.programacionSemanalService.listarConfirmadas(
+      campeonatoId,
+      categoriaId ? Number(categoriaId) : undefined,
+      etapa,
+      jornada ? Number(jornada) : undefined,
+      req.user,
+    );
+  }
+
   @Get('programacion-semanal/:id')
   @UseGuards(RolesGuard)
   @Roles('master', 'directivo_liga')
@@ -105,6 +126,69 @@ export class PartidosController {
   @Roles('master', 'directivo_liga')
   asignarBolillaManual(@Param('id', ParseIntPipe) id: number, @Body() body: { partidoId: number; bolillaId: number }, @Request() req: any) {
     return this.programacionSemanalService.asignarManual(id, Number(body.partidoId), Number(body.bolillaId), req.user);
+  }
+
+  @Get('programacion-semanal/:id/vocalias')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  obtenerVocaliasProgramacion(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.programacionSemanalService.obtenerVocalias(id, req.user);
+  }
+
+  @Post('programacion-semanal/:id/vocalias/preparar')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  prepararVocaliasProgramacion(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.programacionSemanalService.prepararVocalias(id, req.user);
+  }
+
+  @Post('programacion-semanal/:id/vocalias/reiniciar')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  reiniciarVocaliasProgramacion(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.programacionSemanalService.reiniciarVocalias(id, req.user);
+  }
+
+  @Patch('programacion-semanal/:id/vocalias/:vocaliaId')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  configurarVocaliaProgramacion(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('vocaliaId', ParseIntPipe) vocaliaId: number,
+    @Body() dto: ConfigurarVocaliaDto,
+    @Request() req: any,
+  ) {
+    return this.programacionSemanalService.configurarVocalia(id, vocaliaId, dto, req.user);
+  }
+
+  @Post('programacion-semanal/:id/vocalias/:vocaliaId/sortear')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  sortearVocaliaProgramacion(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('vocaliaId', ParseIntPipe) vocaliaId: number,
+    @Body() dto: SortearVocaliaDto,
+    @Request() req: any,
+  ) {
+    return this.programacionSemanalService.sortearVocalia(id, vocaliaId, dto.equipoExtractorId, req.user);
+  }
+
+  @Post('programacion-semanal/:id/vocalias/:vocaliaId/liberar')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  liberarVocaliaProgramacion(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('vocaliaId', ParseIntPipe) vocaliaId: number,
+    @Request() req: any,
+  ) {
+    return this.programacionSemanalService.liberarVocalia(id, vocaliaId, req.user);
+  }
+
+  @Post('programacion-semanal/:id/vocalias/confirmar')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  confirmarVocaliasProgramacion(@Param('id', ParseIntPipe) id: number, @Request() req: any) {
+    return this.programacionSemanalService.confirmarVocalias(id, req.user);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -157,24 +241,10 @@ export class PartidosController {
   @UseGuards(RolesGuard)
   @Roles('master', 'directivo_liga')
   generarFixture(
-    @Body()
-    body: {
-      campeonatoId: number;
-      categoriaId: number;
-      equipoIds: number[];
-      etapa?: string;
-      conRevancha?: boolean;
-    },
+    @Body() body: GenerarFixtureDto,
     @Request() req: any,
   ) {
-    return this.partidosService.generarFixtureRoundRobin(
-      body.campeonatoId,
-      body.categoriaId,
-      body.equipoIds,
-      body.etapa,
-      body.conRevancha ?? false,
-      req.user,
-    );
+    return this.partidosService.generarFixture(body, req.user);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -248,6 +318,16 @@ export class PartidosController {
     @Query('categoriaId', ParseIntPipe) categoriaId: number,
   ) {
     return this.partidosService.getEtapas(campeonatoId, categoriaId);
+  }
+
+  @Get('etapas/detalle')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
+  getEtapasDetalle(
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Query('categoriaId', ParseIntPipe) categoriaId: number,
+  ) {
+    return this.partidosService.getEtapasDetalle(campeonatoId, categoriaId);
   }
 
   /**

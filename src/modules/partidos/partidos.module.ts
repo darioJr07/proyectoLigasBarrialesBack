@@ -12,6 +12,11 @@ import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { ProgramacionSemanal } from './entities/programacion-semanal.entity';
 import { ProgramacionBolilla } from './entities/programacion-bolilla.entity';
 import { ProgramacionSemanalService } from './programacion-semanal.service';
+import { EtapaCompetencia } from './entities/etapa-competencia.entity';
+import { EtapaGrupo } from './entities/etapa-grupo.entity';
+import { EtapaGrupoEquipo } from './entities/etapa-grupo-equipo.entity';
+import { EtapaGrupoBonificacion } from './entities/etapa-grupo-bonificacion.entity';
+import { VocaliaPartido } from './entities/vocalia-partido.entity';
 
 /**
  * Módulo de Partidos
@@ -22,7 +27,12 @@ import { ProgramacionSemanalService } from './programacion-semanal.service';
 @Module({
   imports: [
     // Registra la entidad Partido para poder usar el repositorio en el servicio
-    TypeOrmModule.forFeature([Partido, Gol, ActaAlineacion, ActaIncidencia, Campeonato, ProgramacionSemanal, ProgramacionBolilla]),
+    TypeOrmModule.forFeature([
+      Partido, Gol, ActaAlineacion, ActaIncidencia, Campeonato,
+      ProgramacionSemanal, ProgramacionBolilla, EtapaCompetencia,
+      EtapaGrupo, EtapaGrupoEquipo, EtapaGrupoBonificacion,
+      VocaliaPartido,
+    ]),
     // GolesModule exporta GolesService, que PartidosService usa para registrar goles al guardar resultado
     GolesModule,
     // SancionesModule exporta SancionesService, que PartidosService usa para procesar partidos cumplidos
