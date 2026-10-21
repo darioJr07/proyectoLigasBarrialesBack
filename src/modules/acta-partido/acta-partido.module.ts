@@ -11,9 +11,11 @@ import { Sancion } from '../sanciones/entities/sancion.entity';
 import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { SancionPartidoExcluido } from '../sanciones/entities/sancion-partido-excluido.entity';
 import { VocaliaPartido } from '../partidos/entities/vocalia-partido.entity';
+import { JugadorCampeonatosModule } from '../jugador-campeonatos/jugador-campeonatos.module';
 
 @Module({
   imports: [
+    JugadorCampeonatosModule,
     TypeOrmModule.forFeature([
       ActaAlineacion,
       ActaInformePartido,

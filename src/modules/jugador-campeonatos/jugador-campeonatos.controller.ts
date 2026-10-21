@@ -21,11 +21,17 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { ModuloHabilitado } from '../configuracion/decorators/modulo-habilitado.decorator';
 import { ModuloHabilitadoGuard } from '../configuracion/guards/modulo-habilitado.guard';
+import { RegistrarCambioDorsalDto } from './dto/registrar-cambio-dorsal.dto';
+import { AnularCambioDorsalDto } from './dto/anular-cambio-dorsal.dto';
+import { CambiosDorsalService } from './cambios-dorsal.service';
 
 @Controller('jugador-campeonatos')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class JugadorCampeonatosController {
-  constructor(private readonly jugadorCampeonatosService: JugadorCampeonatosService) {}
+  constructor(
+    private readonly jugadorCampeonatosService: JugadorCampeonatosService,
+    private readonly cambiosDorsalService: CambiosDorsalService,
+  ) {}
 
   @Post()
   @Roles('master', 'directivo_liga', 'dirigente_equipo')
@@ -146,6 +152,36 @@ export class JugadorCampeonatosController {
     @Request() req: any,
   ) {
     return this.jugadorCampeonatosService.darDeBaja(id, motivo, req.user);
+  }
+
+  @Get(':id/cambios-dorsal/opciones')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  opcionesCambioDorsal(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req: any,
+  ) {
+    return this.cambiosDorsalService.obtenerOpciones(id, req.user);
+  }
+
+  @Post(':id/cambios-dorsal')
+  @Roles('master', 'directivo_liga')
+  registrarCambioDorsal(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RegistrarCambioDorsalDto,
+    @Request() req: any,
+  ) {
+    return this.cambiosDorsalService.registrar(id, dto, req.user);
+  }
+
+  @Patch(':id/cambios-dorsal/:cambioId/anular')
+  @Roles('master', 'directivo_liga')
+  anularCambioDorsal(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('cambioId', ParseIntPipe) cambioId: number,
+    @Body() dto: AnularCambioDorsalDto,
+    @Request() req: any,
+  ) {
+    return this.cambiosDorsalService.anular(id, cambioId, dto.motivo, req.user);
   }
 
   @Delete(':id')

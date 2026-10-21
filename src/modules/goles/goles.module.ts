@@ -5,6 +5,7 @@ import { GolesService } from './goles.service';
 import { GolesController } from './goles.controller';
 import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
 import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
+import { JugadorCampeonatosModule } from '../jugador-campeonatos/jugador-campeonatos.module';
 
 /**
  * Módulo de Goles
@@ -13,7 +14,10 @@ import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
  * y registrar los goles al guardar un resultado.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([Gol, JugadorCampeonato, Inscripcion])],
+  imports: [
+    JugadorCampeonatosModule,
+    TypeOrmModule.forFeature([Gol, JugadorCampeonato, Inscripcion]),
+  ],
   controllers: [GolesController],
   providers: [GolesService],
   exports: [GolesService],

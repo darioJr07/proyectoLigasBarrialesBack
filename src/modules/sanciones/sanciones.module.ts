@@ -11,9 +11,10 @@ import { SancionPartidoExcluido } from './entities/sancion-partido-excluido.enti
 import { Partido } from '../partidos/entities/partido.entity';
 import { SancionesService } from './sanciones.service';
 import { SancionesController } from './sanciones.controller';
+import { JugadorCampeonatosModule } from '../jugador-campeonatos/jugador-campeonatos.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TipoSancion, ReglaSancion, Sancion, JugadorCampeonato, Campeonato, Partido, ActaAlineacion, SancionPartidoCumplido, SancionPartidoExcluido])],
+  imports: [JugadorCampeonatosModule, TypeOrmModule.forFeature([TipoSancion, ReglaSancion, Sancion, JugadorCampeonato, Campeonato, Partido, ActaAlineacion, SancionPartidoCumplido, SancionPartidoExcluido])],
   controllers: [SancionesController],
   providers: [SancionesService],
   exports: [SancionesService],

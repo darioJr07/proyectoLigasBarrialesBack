@@ -22,6 +22,7 @@ import { SancionPartidoCumplido } from './entities/sancion-partido-cumplido.enti
 import { SancionPartidoExcluido } from './entities/sancion-partido-excluido.entity';
 import { Partido } from '../partidos/entities/partido.entity';
 import { AplicarReparacionSancionesDto } from './dto/aplicar-reparacion-sanciones.dto';
+import { CambiosDorsalService } from '../jugador-campeonatos/cambios-dorsal.service';
 
 @Injectable()
 export class SancionesService {
@@ -44,6 +45,7 @@ export class SancionesService {
     private actaAlineacionRepo: Repository<ActaAlineacion>,
     @InjectRepository(Campeonato)
     private campeonatoRepo: Repository<Campeonato>,
+    private readonly cambiosDorsalService: CambiosDorsalService,
   ) {}
 
   /**
@@ -130,13 +132,16 @@ export class SancionesService {
     for (const habilitacion of habilitaciones) {
       actuales.set(`${habilitacion.jugadorId}-${habilitacion.campeonatoId}`, habilitacion);
     }
+    const numerosActuales = await this.cambiosDorsalService.resolverNumerosActuales(habilitaciones);
 
     for (const sancion of sanciones) {
       if (!sancion.jugadorId) continue;
       const actual = actuales.get(`${sancion.jugadorId}-${sancion.campeonatoId}`);
       (sancion as any).equipoActual = actual?.equipo ?? null;
       (sancion as any).equipoActualId = actual?.equipoId ?? null;
-      (sancion as any).numeroCanchaActual = actual?.numeroCancha ?? null;
+      (sancion as any).numeroCanchaActual = actual
+        ? numerosActuales.get(actual.id) ?? actual.numeroCancha
+        : null;
       (sancion as any).equipoTransferido = !!actual && actual.equipoId !== sancion.equipoId;
     }
     return sanciones;

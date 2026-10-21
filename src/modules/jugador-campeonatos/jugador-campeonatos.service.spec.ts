@@ -11,6 +11,7 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
   let inscripcionRepo: Record<string, jest.Mock>;
   let transferenciaRepo: Record<string, jest.Mock>;
   let dataSource: { transaction: jest.Mock };
+  let cambiosDorsalService: Record<string, jest.Mock>;
 
   beforeEach(() => {
     habilitacionRepo = {
@@ -28,6 +29,10 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
     inscripcionRepo = { findOne: jest.fn() };
     transferenciaRepo = { findOne: jest.fn() };
     dataSource = { transaction: jest.fn() };
+    cambiosDorsalService = {
+      adjuntarCambiosActivos: jest.fn(async (items: any[]) => items),
+      validarDorsalParaHabilitacion: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new JugadorCampeonatosService(
       habilitacionRepo as any,
@@ -39,6 +44,7 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
       transferenciaRepo as any,
       {} as any,
       dataSource as any,
+      cambiosDorsalService as any,
     );
   });
 
@@ -87,7 +93,6 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
     habilitacionRepo.findOne
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(rechazada)
-      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(reactivada);
     habilitacionRepo.count.mockResolvedValue(2);
 
@@ -111,6 +116,9 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
       expect.objectContaining({ estado: 'rechazado', activo: false, equipoId: 10 }),
     );
     expect(habilitacionRepo.create).not.toHaveBeenCalled();
+    expect(cambiosDorsalService.validarDorsalParaHabilitacion).toHaveBeenCalledWith(
+      expect.objectContaining({ numeroCancha: 12, excluirHabilitacionId: 77 }),
+    );
     expect(result).toEqual(reactivada);
   });
 

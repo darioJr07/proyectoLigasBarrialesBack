@@ -12,6 +12,10 @@ import { Usuario } from '../auth/entities/usuario.entity';
 import { Transferencia } from '../transferencias/entities/transferencia.entity';
 import { Sancion } from '../sanciones/entities/sancion.entity';
 import { ConfiguracionModule } from '../configuracion/configuracion.module';
+import { CambioDorsalEtapa } from './entities/cambio-dorsal-etapa.entity';
+import { EtapaCompetencia } from '../partidos/entities/etapa-competencia.entity';
+import { Partido } from '../partidos/entities/partido.entity';
+import { CambiosDorsalService } from './cambios-dorsal.service';
 
 @Module({
   imports: [
@@ -26,10 +30,13 @@ import { ConfiguracionModule } from '../configuracion/configuracion.module';
       Usuario,
       Transferencia,
       Sancion,
+      CambioDorsalEtapa,
+      EtapaCompetencia,
+      Partido,
     ]),
   ],
   controllers: [JugadorCampeonatosController],
-  providers: [JugadorCampeonatosService],
-  exports: [JugadorCampeonatosService],
+  providers: [JugadorCampeonatosService, CambiosDorsalService],
+  exports: [JugadorCampeonatosService, CambiosDorsalService],
 })
 export class JugadorCampeonatosModule {}

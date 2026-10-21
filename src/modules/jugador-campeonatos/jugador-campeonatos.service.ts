@@ -13,6 +13,7 @@ import { Categoria } from '../categorias/entities/categoria.entity';
 import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
 import { Transferencia } from '../transferencias/entities/transferencia.entity';
 import { Sancion } from '../sanciones/entities/sancion.entity';
+import { CambiosDorsalService } from './cambios-dorsal.service';
 
 @Injectable()
 export class JugadorCampeonatosService {
@@ -34,6 +35,7 @@ export class JugadorCampeonatosService {
     @InjectRepository(Sancion)
     private sancionRepo: Repository<Sancion>,
     private dataSource: DataSource,
+    private readonly cambiosDorsalService: CambiosDorsalService,
   ) {}
 
   private async assertCampeonatoAccess(campeonato: Campeonato, usuario: any): Promise<void> {
@@ -238,20 +240,13 @@ export class JugadorCampeonatosService {
 
       // Validar que el número de camiseta no esté en uso por otro jugador
       if (dto.numeroCancha) {
-        const numeroDuplicado = await this.jugadorCampeonatoRepo.findOne({
-          where: {
-            campeonatoId: dto.campeonatoId,
-            equipoId: dto.equipoId,
-            numeroCancha: dto.numeroCancha,
-            activo: true,
-          },
+        await this.cambiosDorsalService.validarDorsalParaHabilitacion({
+          campeonatoId: dto.campeonatoId,
+          categoriaId: dto.categoriaId,
+          equipoId: dto.equipoId,
+          numeroCancha: dto.numeroCancha,
+          excluirHabilitacionId: solicitudRechazada.id,
         });
-
-        if (numeroDuplicado && numeroDuplicado.jugadorId !== dto.jugadorId) {
-          throw new BadRequestException(
-            `El número de camiseta ${dto.numeroCancha} ya está asignado a otro jugador en este campeonato y equipo`
-          );
-        }
       }
 
       // Reactivar la ficha existente del mismo equipo
@@ -302,20 +297,12 @@ export class JugadorCampeonatosService {
 
     // Validar que el número de camiseta no esté en uso por otro jugador
     if (dto.numeroCancha) {
-      const numeroDuplicado = await this.jugadorCampeonatoRepo.findOne({
-        where: {
-          campeonatoId: dto.campeonatoId,
-          equipoId: dto.equipoId,
-          numeroCancha: dto.numeroCancha,
-          activo: true,
-        },
+      await this.cambiosDorsalService.validarDorsalParaHabilitacion({
+        campeonatoId: dto.campeonatoId,
+        categoriaId: dto.categoriaId,
+        equipoId: dto.equipoId,
+        numeroCancha: dto.numeroCancha,
       });
-
-      if (numeroDuplicado) {
-        throw new BadRequestException(
-          `El número de camiseta ${dto.numeroCancha} ya está asignado a otro jugador en este campeonato y equipo`
-        );
-      }
     }
 
     // 11. Crear nueva inscripción con estado pendiente
@@ -356,10 +343,11 @@ export class JugadorCampeonatosService {
       whereCondition.equipoId = usuario.equipoId;
     }
 
-    return await this.jugadorCampeonatoRepo.find({
+    const habilitaciones = await this.jugadorCampeonatoRepo.find({
       where: whereCondition,
       order: { fechaInscripcion: 'DESC' },
     });
+    return this.cambiosDorsalService.adjuntarCambiosActivos(habilitaciones) as any;
   }
 
   async findOne(id: number, usuario: any): Promise<JugadorCampeonato> {
@@ -383,7 +371,8 @@ export class JugadorCampeonatosService {
       }
     }
 
-    return jugadorCampeonato;
+    const [resultado] = await this.cambiosDorsalService.adjuntarCambiosActivos([jugadorCampeonato]);
+    return resultado as JugadorCampeonato;
   }
 
   async findByCampeonato(campeonatoId: number, usuario: any): Promise<JugadorCampeonato[]> {
@@ -401,7 +390,7 @@ export class JugadorCampeonatosService {
       order: { fechaInscripcion: 'DESC' },
     });
 
-    return inscripciones;
+    return this.cambiosDorsalService.adjuntarCambiosActivos(inscripciones) as any;
   }
 
   /**
@@ -472,7 +461,7 @@ export class JugadorCampeonatosService {
       order: { numeroCancha: 'ASC' },
     });
 
-    return inscripciones;
+    return this.cambiosDorsalService.adjuntarCambiosActivos(inscripciones) as any;
   }
 
   async findByJugador(jugadorId: number, usuario: any): Promise<JugadorCampeonato[]> {
@@ -518,20 +507,18 @@ export class JugadorCampeonatosService {
 
     // Validar número de camiseta duplicado si se está actualizando
     if (dto.numeroCancha !== undefined && dto.numeroCancha !== jugadorCampeonato.numeroCancha) {
-      const numeroDuplicado = await this.jugadorCampeonatoRepo.findOne({
-        where: {
-          campeonatoId: jugadorCampeonato.campeonatoId,
-          equipoId: jugadorCampeonato.equipoId,
-          numeroCancha: dto.numeroCancha,
-          activo: true,
-        },
-      });
-
-      if (numeroDuplicado && numeroDuplicado.id !== id) {
+      if (jugadorCampeonato.estado === 'habilitado') {
         throw new BadRequestException(
-          `El número de camiseta ${dto.numeroCancha} ya está asignado a otro jugador en este campeonato y equipo`
+          'Una habilitación aprobada no puede cambiar su dorsal original. Usa la opción Cambiar dorsal por etapa.',
         );
       }
+      await this.cambiosDorsalService.validarDorsalParaHabilitacion({
+        campeonatoId: jugadorCampeonato.campeonatoId,
+        categoriaId: dto.categoriaId ?? jugadorCampeonato.categoriaId,
+        equipoId: jugadorCampeonato.equipoId,
+        numeroCancha: dto.numeroCancha,
+        excluirHabilitacionId: id,
+      });
     }
 
     // Validar categoría si se está actualizando
@@ -638,20 +625,13 @@ export class JugadorCampeonatosService {
       );
     }
 
-    const numeroDuplicado = await this.jugadorCampeonatoRepo.findOne({
-      where: {
-        id: Not(jugadorCampeonato.id),
-        campeonatoId: jugadorCampeonato.campeonatoId,
-        equipoId: jugadorCampeonato.equipoId,
-        numeroCancha: jugadorCampeonato.numeroCancha,
-        activo: true,
-      },
+    await this.cambiosDorsalService.validarDorsalParaHabilitacion({
+      campeonatoId: jugadorCampeonato.campeonatoId,
+      categoriaId: jugadorCampeonato.categoriaId,
+      equipoId: jugadorCampeonato.equipoId,
+      numeroCancha: jugadorCampeonato.numeroCancha,
+      excluirHabilitacionId: jugadorCampeonato.id,
     });
-    if (numeroDuplicado) {
-      throw new BadRequestException(
-        `El numero de camiseta ${jugadorCampeonato.numeroCancha} ya esta asignado a otro jugador`,
-      );
-    }
 
     jugadorCampeonato.estado = 'habilitado';
     jugadorCampeonato.aprobadoPor = usuario.userId;

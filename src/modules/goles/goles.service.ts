@@ -6,6 +6,7 @@ import { CreateGolDto } from './dto/create-gol.dto';
 import { Partido } from '../partidos/entities/partido.entity';
 import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
 import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
+import { CambiosDorsalService } from '../jugador-campeonatos/cambios-dorsal.service';
 
 /**
  * Fila de la tabla de goleadores para un jugador.
@@ -31,6 +32,7 @@ export class GolesService {
     private readonly jugadorCampeonatoRepository: Repository<JugadorCampeonato>,
     @InjectRepository(Inscripcion)
     private readonly inscripcionesRepository: Repository<Inscripcion>,
+    private readonly cambiosDorsalService: CambiosDorsalService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -204,6 +206,7 @@ export class GolesService {
     for (const habilitacion of habilitaciones) {
       habilitacionActual.set(habilitacion.jugadorId, habilitacion);
     }
+    const numerosActuales = await this.cambiosDorsalService.resolverNumerosActuales(habilitaciones);
 
     const idsEquiposActuales = Array.from(new Set(
       Array.from(equipoActualJugador.values()).map((equipo) => equipo.id),
@@ -232,7 +235,7 @@ export class GolesService {
       if (habilitacion?.equipo) {
         fila.equipoId = habilitacion.equipoId;
         fila.equipoNombre = habilitacion.equipo.nombre;
-        fila.numeroCancha = habilitacion.numeroCancha ?? null;
+        fila.numeroCancha = numerosActuales.get(habilitacion.id) ?? habilitacion.numeroCancha ?? null;
       } else if (equipoJugador && equiposInscritosEnCategoria.has(equipoJugador.id)) {
         fila.equipoId = equipoJugador.id;
         fila.equipoNombre = equipoJugador.nombre;

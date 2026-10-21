@@ -18,6 +18,7 @@ import { Sancion } from '../sanciones/entities/sancion.entity';
 import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { SancionPartidoExcluido } from '../sanciones/entities/sancion-partido-excluido.entity';
 import { VocaliaPartido } from '../partidos/entities/vocalia-partido.entity';
+import { CambiosDorsalService } from '../jugador-campeonatos/cambios-dorsal.service';
 
 @Injectable()
 export class ActaPartidoService {
@@ -46,6 +47,7 @@ export class ActaPartidoService {
     private readonly campeonatoRepo: Repository<Campeonato>,
     @InjectRepository(VocaliaPartido)
     private readonly vocaliaRepo: Repository<VocaliaPartido>,
+    private readonly cambiosDorsalService: CambiosDorsalService,
   ) {}
 
   private sancionTemporalVigente(sancion: Sancion): boolean {
@@ -114,6 +116,11 @@ export class ActaPartidoService {
     );
 
     const idsSancionados = new Set(sancionesVigentes.map((s) => s.jugadorId));
+    const numerosEfectivos = await this.cambiosDorsalService.resolverNumerosParaContexto(
+      jugadores,
+      partido.etapa,
+      partido.jornada,
+    );
 
     // Mapear y separar por equipo
     const mapearJugador = (jc: JugadorCampeonato) => ({
@@ -121,7 +128,7 @@ export class ActaPartidoService {
       jugador: jc.jugador,
       equipoId: jc.equipoId,
       equipo: jc.equipo,
-      numeroCancha: jc.numeroCancha,
+      numeroCancha: numerosEfectivos.get(jc.id) ?? jc.numeroCancha,
       estadoSugerido: idsSancionados.has(jc.jugadorId) ? 'suspendido' : 'jugo',
       sancionActiva: sancionesVigentes.find((s) => s.jugadorId === jc.jugadorId) ?? null,
     });
@@ -130,10 +137,12 @@ export class ActaPartidoService {
       partido,
       jugadoresLocal: jugadores
         .filter((j) => j.equipoId === partido.equipoLocalId)
-        .map(mapearJugador),
+        .map(mapearJugador)
+        .sort((a, b) => a.numeroCancha - b.numeroCancha),
       jugadoresVisitante: jugadores
         .filter((j) => j.equipoId === partido.equipoVisitanteId)
-        .map(mapearJugador),
+        .map(mapearJugador)
+        .sort((a, b) => a.numeroCancha - b.numeroCancha),
     };
   }
 
@@ -362,17 +371,31 @@ export class ActaPartidoService {
       where: { campeonatoId, jugadorId: In(jugadorIds), activo: true },
       order: { fechaInscripcion: 'DESC' },
     });
-    const numeroPorInscripcion = new Map<string, number>();
+    const inscripcionPorClave = new Map<string, JugadorCampeonato>();
     for (const inscripcion of inscripciones) {
       const clave = `${inscripcion.jugadorId}-${inscripcion.equipoId}-${inscripcion.categoriaId}`;
-      if (!numeroPorInscripcion.has(clave)) numeroPorInscripcion.set(clave, inscripcion.numeroCancha);
+      if (!inscripcionPorClave.has(clave)) inscripcionPorClave.set(clave, inscripcion);
     }
 
-    return incidencias.map((incidencia) => ({
-      ...incidencia,
-      numeroCancha: incidencia.jugadorId && incidencia.categoriaId
-        ? numeroPorInscripcion.get(`${incidencia.jugadorId}-${incidencia.equipoId}-${incidencia.categoriaId}`) ?? null
-        : null,
+    return Promise.all(incidencias.map(async incidencia => {
+      if (!incidencia.jugadorId || !incidencia.categoriaId) {
+        return { ...incidencia, numeroCancha: null };
+      }
+      const inscripcion = inscripcionPorClave.get(
+        `${incidencia.jugadorId}-${incidencia.equipoId}-${incidencia.categoriaId}`,
+      );
+      if (!inscripcion) return { ...incidencia, numeroCancha: null };
+      const partido = incidencia.partido;
+      if (!partido) return { ...incidencia, numeroCancha: inscripcion.numeroCancha };
+      const numeros = await this.cambiosDorsalService.resolverNumerosParaContexto(
+        [inscripcion],
+        partido.etapa,
+        partido.jornada,
+      );
+      return {
+        ...incidencia,
+        numeroCancha: numeros.get(inscripcion.id) ?? inscripcion.numeroCancha,
+      };
     }));
   }
 

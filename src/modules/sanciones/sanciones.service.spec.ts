@@ -29,6 +29,11 @@ describe('SancionesService - sanciones despues de una transferencia', () => {
       habilitacionRepo as any,
       actaRepo as any,
       {} as any,
+      {
+        resolverNumerosActuales: jest.fn(async (habilitaciones: any[]) =>
+          new Map(habilitaciones.map(item => [item.id, item.numeroCancha])),
+        ),
+      } as any,
     );
   });
 

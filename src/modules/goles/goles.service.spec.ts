@@ -14,6 +14,11 @@ describe('GolesService - equipo actual del goleador', () => {
       golesRepository as any,
       habilitacionesRepository as any,
       inscripcionesRepository as any,
+      {
+        resolverNumerosActuales: jest.fn(async (habilitaciones: any[]) =>
+          new Map(habilitaciones.map(item => [item.id, item.numeroCancha])),
+        ),
+      } as any,
     );
   });
 
