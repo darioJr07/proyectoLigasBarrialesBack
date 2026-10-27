@@ -17,6 +17,9 @@ import { EtapaGrupo } from './entities/etapa-grupo.entity';
 import { EtapaGrupoEquipo } from './entities/etapa-grupo-equipo.entity';
 import { EtapaGrupoBonificacion } from './entities/etapa-grupo-bonificacion.entity';
 import { VocaliaPartido } from './entities/vocalia-partido.entity';
+import { SolicitudHorario } from './entities/solicitud-horario.entity';
+import { SolicitudesHorarioService } from './solicitudes-horario.service';
+import { ProgramacionSeleccion } from './entities/programacion-seleccion.entity';
 
 /**
  * Módulo de Partidos
@@ -32,6 +35,7 @@ import { VocaliaPartido } from './entities/vocalia-partido.entity';
       ProgramacionSemanal, ProgramacionBolilla, EtapaCompetencia,
       EtapaGrupo, EtapaGrupoEquipo, EtapaGrupoBonificacion,
       VocaliaPartido,
+      SolicitudHorario, ProgramacionSeleccion,
     ]),
     // GolesModule exporta GolesService, que PartidosService usa para registrar goles al guardar resultado
     GolesModule,
@@ -39,7 +43,7 @@ import { VocaliaPartido } from './entities/vocalia-partido.entity';
     SancionesModule,
   ],
   controllers: [PartidosController],
-  providers: [PartidosService, ProgramacionSemanalService],
+  providers: [PartidosService, ProgramacionSemanalService, SolicitudesHorarioService],
   exports: [PartidosService], // Exportamos el servicio por si otros módulos lo necesitan
 })
 export class PartidosModule {}

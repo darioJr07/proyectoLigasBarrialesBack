@@ -1,6 +1,10 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity('programacion_bolillas')
+@Index('uq_bolilla_solicitud_horario', ['solicitudHorarioId'], {
+  unique: true,
+  where: '"solicitud_horario_id" IS NOT NULL',
+})
 export class ProgramacionBolilla {
   @PrimaryGeneratedColumn()
   id: number;
@@ -31,6 +35,9 @@ export class ProgramacionBolilla {
 
   @Column({ name: 'asignacion_manual', type: 'boolean', default: false })
   asignacionManual: boolean;
+
+  @Column({ name: 'solicitud_horario_id', type: 'int', nullable: true })
+  solicitudHorarioId: number | null;
 
   @CreateDateColumn({ name: 'creado_en' })
   creadoEn: Date;

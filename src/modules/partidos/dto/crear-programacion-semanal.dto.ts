@@ -12,6 +12,14 @@ export class BolillaHorarioDto {
   cancha: string;
 }
 
+export class SeleccionProgramacionDto {
+  @IsInt() @Min(1)
+  categoriaId: number;
+
+  @IsInt() @Min(1)
+  jornada: number;
+}
+
 export class CrearProgramacionSemanalDto {
   @IsInt() @Min(1)
   campeonatoId: number;
@@ -24,6 +32,14 @@ export class CrearProgramacionSemanalDto {
 
   @IsInt() @Min(1)
   jornada: number;
+
+  /**
+   * Permite combinar, en un mismo bolillero, una jornada distinta por
+   * categoría. Si no se envía se mantiene el flujo histórico de
+   * categoriaId/jornada.
+   */
+  @IsOptional() @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => SeleccionProgramacionDto)
+  selecciones?: SeleccionProgramacionDto[];
 
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => BolillaHorarioDto)
   bolillas: BolillaHorarioDto[];

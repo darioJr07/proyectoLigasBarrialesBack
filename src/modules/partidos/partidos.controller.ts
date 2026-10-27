@@ -22,6 +22,8 @@ import { ProgramacionSemanalService } from './programacion-semanal.service';
 import { CrearProgramacionSemanalDto } from './dto/crear-programacion-semanal.dto';
 import { GenerarFixtureDto } from './dto/generar-fixture.dto';
 import { ConfigurarVocaliaDto, SortearVocaliaDto } from './dto/vocalia-programacion.dto';
+import { SolicitudesHorarioService } from './solicitudes-horario.service';
+import { CrearSolicitudHorarioDto, ResolverSolicitudHorarioDto } from './dto/solicitud-horario.dto';
 
 /**
  * Controlador de Partidos
@@ -45,7 +47,48 @@ import { ConfigurarVocaliaDto, SortearVocaliaDto } from './dto/vocalia-programac
 @Controller('partidos')
 @UseGuards(JwtAuthGuard)
 export class PartidosController {
-  constructor(private readonly partidosService: PartidosService, private readonly programacionSemanalService: ProgramacionSemanalService) {}
+  constructor(
+    private readonly partidosService: PartidosService,
+    private readonly programacionSemanalService: ProgramacionSemanalService,
+    private readonly solicitudesHorarioService: SolicitudesHorarioService,
+  ) {}
+
+  @Post('solicitudes-horario')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  crearSolicitudHorario(@Body() dto: CrearSolicitudHorarioDto, @Request() req: any) {
+    return this.solicitudesHorarioService.crear(dto, req.user);
+  }
+
+  @Get('solicitudes-horario')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  listarSolicitudesHorario(
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Query('categoriaId') categoriaId: string | undefined,
+    @Query('etapa') etapa: string | undefined,
+    @Query('estado') estado: string | undefined,
+    @Request() req: any,
+  ) {
+    return this.solicitudesHorarioService.listar(
+      campeonatoId,
+      categoriaId ? Number(categoriaId) : undefined,
+      etapa,
+      estado,
+      req.user,
+    );
+  }
+
+  @Patch('solicitudes-horario/:id/resolver')
+  @UseGuards(RolesGuard)
+  @Roles('master', 'directivo_liga')
+  resolverSolicitudHorario(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ResolverSolicitudHorarioDto,
+    @Request() req: any,
+  ) {
+    return this.solicitudesHorarioService.resolver(id, dto, req.user);
+  }
 
   @Post('programacion-semanal')
   @UseGuards(RolesGuard)
@@ -61,10 +104,24 @@ export class PartidosController {
     @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
     @Query('categoriaId') categoriaId: string | undefined,
     @Query('etapa') etapa: string,
-    @Query('jornada', ParseIntPipe) jornada: number,
+    @Query('jornada') jornada: string | undefined,
+    @Query('selecciones') selecciones: string | undefined,
     @Request() req: any,
   ) {
-    return this.programacionSemanalService.pendiente(campeonatoId, categoriaId ? Number(categoriaId) : undefined, etapa, jornada, req.user);
+    const seleccionesSolicitadas = selecciones
+      ? selecciones.split(',').filter(Boolean).map(item => {
+          const [categoria, jornadaSeleccionada] = item.split(':').map(Number);
+          return { categoriaId: categoria, jornada: jornadaSeleccionada };
+        })
+      : undefined;
+    return this.programacionSemanalService.pendiente(
+      campeonatoId,
+      categoriaId ? Number(categoriaId) : undefined,
+      etapa,
+      jornada ? Number(jornada) : undefined,
+      req.user,
+      seleccionesSolicitadas,
+    );
   }
 
   @Get('programacion-semanal/confirmadas')
@@ -124,8 +181,18 @@ export class PartidosController {
   @Post('programacion-semanal/:id/asignar-manual')
   @UseGuards(RolesGuard)
   @Roles('master', 'directivo_liga')
-  asignarBolillaManual(@Param('id', ParseIntPipe) id: number, @Body() body: { partidoId: number; bolillaId: number }, @Request() req: any) {
-    return this.programacionSemanalService.asignarManual(id, Number(body.partidoId), Number(body.bolillaId), req.user);
+  asignarBolillaManual(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { partidoId: number; bolillaId: number; solicitudHorarioId?: number },
+    @Request() req: any,
+  ) {
+    return this.programacionSemanalService.asignarManual(
+      id,
+      Number(body.partidoId),
+      Number(body.bolillaId),
+      req.user,
+      body.solicitudHorarioId ? Number(body.solicitudHorarioId) : undefined,
+    );
   }
 
   @Get('programacion-semanal/:id/vocalias')
