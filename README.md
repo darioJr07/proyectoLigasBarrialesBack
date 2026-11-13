@@ -5,6 +5,8 @@ API REST construida con NestJS, TypeScript, PostgreSQL y TypeORM.
 **Estado de documentacion:** actualizado el 15/10/2026.
 Para el estado funcional completo del sistema, revisar [../ESTADO_ACTUAL_PROYECTO.md](../ESTADO_ACTUAL_PROYECTO.md).
 
+Actualizacion 12/11/2026: `jugador-campeonatos` distingue solicitudes normales y reingresos posteriores a una baja. Conserva ambas fichas, registra auditoria de la baja, permite regularizar solicitudes historicas y bloquea la aprobacion de reingresos no vinculados. La estructura se incorpora mediante `1750300000000-AddReingresoJugadorCampeonato.ts`.
+
 ## Tecnologias
 
 - NestJS

@@ -14,6 +14,8 @@ import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
 import { Transferencia } from '../transferencias/entities/transferencia.entity';
 import { Sancion } from '../sanciones/entities/sancion.entity';
 import { CambiosDorsalService } from './cambios-dorsal.service';
+import { Gol } from '../goles/entities/gol.entity';
+import { RegularizarReingresoDto } from './dto/regularizar-reingreso.dto';
 
 @Injectable()
 export class JugadorCampeonatosService {
@@ -34,6 +36,8 @@ export class JugadorCampeonatosService {
     private transferenciaRepo: Repository<Transferencia>,
     @InjectRepository(Sancion)
     private sancionRepo: Repository<Sancion>,
+    @InjectRepository(Gol)
+    private golRepo: Repository<Gol>,
     private dataSource: DataSource,
     private readonly cambiosDorsalService: CambiosDorsalService,
   ) {}
@@ -67,6 +71,43 @@ export class JugadorCampeonatosService {
     if (!campeonato) throw new NotFoundException('Campeonato no encontrado');
     await this.assertCampeonatoAccess(campeonato, usuario);
     return campeonato;
+  }
+
+  private async buscarBajaAnterior(
+    jugadorId: number,
+    campeonatoId: number,
+    equipoId: number,
+    excluirId?: number,
+  ): Promise<JugadorCampeonato | null> {
+    return this.jugadorCampeonatoRepo.findOne({
+      where: {
+        ...(excluirId ? { id: Not(excluirId) } : {}),
+        jugadorId,
+        campeonatoId,
+        equipoId,
+        estado: 'baja',
+        activo: false,
+      },
+      order: { id: 'DESC' },
+    });
+  }
+
+  private async adjuntarContextoReingreso(habilitaciones: JugadorCampeonato[]): Promise<any[]> {
+    if (!habilitaciones.length) return habilitaciones;
+    const origenIds = [...new Set(
+      habilitaciones
+        .map((item) => item.habilitacionOrigenId)
+        .filter((id): id is number => !!id),
+    )];
+    if (!origenIds.length) return habilitaciones;
+    const origenes = await this.jugadorCampeonatoRepo.find({ where: { id: In(origenIds) } });
+    const porId = new Map(origenes.map((item) => [item.id, item]));
+    return habilitaciones.map((item) => ({
+      ...item,
+      habilitacionOrigen: item.habilitacionOrigenId
+        ? porId.get(item.habilitacionOrigenId) ?? null
+        : null,
+    }));
   }
 
   async create(dto: CreateJugadorCampeonatoDto, usuario: any): Promise<JugadorCampeonato> {
@@ -207,6 +248,21 @@ export class JugadorCampeonatosService {
       throw new BadRequestException('Este jugador ya tiene una habilitación activa en el campeonato.');
     }
 
+    const bajaAnterior = await this.buscarBajaAnterior(
+      dto.jugadorId,
+      dto.campeonatoId,
+      dto.equipoId,
+    );
+    const esReingreso = !!bajaAnterior;
+    const motivoReingreso = dto.motivoReingreso?.trim() || null;
+    const referenciaReingreso = dto.referenciaReingreso?.trim() || null;
+
+    if (esReingreso && !motivoReingreso) {
+      throw new BadRequestException(
+        'El jugador ya fue dado de baja en este campeonato. Debes indicar el motivo del reingreso.',
+      );
+    }
+
     // Si existe una habilitación inactiva/rechazada del MISMO equipo, reutilizarla
     const solicitudRechazada = await this.jugadorCampeonatoRepo.findOne({
       where: {
@@ -262,6 +318,10 @@ export class JugadorCampeonatosService {
           aprobadoPor: null,
           fechaAprobacion: null,
           observaciones: null,
+          tipoSolicitud: esReingreso ? 'reingreso' : 'normal',
+          habilitacionOrigenId: bajaAnterior?.id ?? null,
+          motivoReingreso,
+          referenciaReingreso,
           fechaInscripcion: new Date(),
         }
       );
@@ -321,6 +381,10 @@ export class JugadorCampeonatosService {
 
       const jugadorCampeonato = repo.create({
         ...dto,
+        motivoReingreso,
+        referenciaReingreso,
+        tipoSolicitud: esReingreso ? 'reingreso' : 'normal',
+        habilitacionOrigenId: bajaAnterior?.id ?? null,
         estado: 'pendiente',
         solicitadoPor: usuario.userId,
       });
@@ -347,7 +411,8 @@ export class JugadorCampeonatosService {
       where: whereCondition,
       order: { fechaInscripcion: 'DESC' },
     });
-    return this.cambiosDorsalService.adjuntarCambiosActivos(habilitaciones) as any;
+    const conDorsales = await this.cambiosDorsalService.adjuntarCambiosActivos(habilitaciones);
+    return this.adjuntarContextoReingreso(conDorsales as JugadorCampeonato[]) as any;
   }
 
   async findOne(id: number, usuario: any): Promise<JugadorCampeonato> {
@@ -371,7 +436,8 @@ export class JugadorCampeonatosService {
       }
     }
 
-    const [resultado] = await this.cambiosDorsalService.adjuntarCambiosActivos([jugadorCampeonato]);
+    const conDorsales = await this.cambiosDorsalService.adjuntarCambiosActivos([jugadorCampeonato]);
+    const [resultado] = await this.adjuntarContextoReingreso(conDorsales as JugadorCampeonato[]);
     return resultado as JugadorCampeonato;
   }
 
@@ -390,7 +456,8 @@ export class JugadorCampeonatosService {
       order: { fechaInscripcion: 'DESC' },
     });
 
-    return this.cambiosDorsalService.adjuntarCambiosActivos(inscripciones) as any;
+    const conDorsales = await this.cambiosDorsalService.adjuntarCambiosActivos(inscripciones);
+    return this.adjuntarContextoReingreso(conDorsales as JugadorCampeonato[]) as any;
   }
 
   /**
@@ -461,7 +528,8 @@ export class JugadorCampeonatosService {
       order: { numeroCancha: 'ASC' },
     });
 
-    return this.cambiosDorsalService.adjuntarCambiosActivos(inscripciones) as any;
+    const conDorsales = await this.cambiosDorsalService.adjuntarCambiosActivos(inscripciones);
+    return this.adjuntarContextoReingreso(conDorsales as JugadorCampeonato[]) as any;
   }
 
   async findByJugador(jugadorId: number, usuario: any): Promise<JugadorCampeonato[]> {
@@ -471,16 +539,17 @@ export class JugadorCampeonatosService {
       order: { fechaInscripcion: 'DESC' },
     });
 
-    if (usuario.role === 'master') return habilitaciones;
+    let permitidas: JugadorCampeonato[] = [];
+    if (usuario.role === 'master') permitidas = habilitaciones;
     if (usuario.role === 'directivo_liga') {
       if (!usuario.ligaId) return [];
-      return habilitaciones.filter((item) => item.campeonato?.ligaId === usuario.ligaId);
+      permitidas = habilitaciones.filter((item) => item.campeonato?.ligaId === usuario.ligaId);
     }
     if (usuario.role === 'dirigente_equipo') {
       if (!usuario.equipoId) return [];
-      return habilitaciones.filter((item) => item.equipoId === usuario.equipoId);
+      permitidas = habilitaciones.filter((item) => item.equipoId === usuario.equipoId);
     }
-    return [];
+    return this.adjuntarContextoReingreso(permitidas) as any;
   }
 
   async update(id: number, dto: UpdateJugadorCampeonatoDto, usuario: any): Promise<JugadorCampeonato> {
@@ -579,6 +648,24 @@ export class JugadorCampeonatosService {
       throw new BadRequestException('Esta habilitación ya fue procesada');
     }
 
+    const bajaAnterior = await this.buscarBajaAnterior(
+      jugadorCampeonato.jugadorId,
+      jugadorCampeonato.campeonatoId,
+      jugadorCampeonato.equipoId,
+      jugadorCampeonato.id,
+    );
+    if (bajaAnterior && jugadorCampeonato.tipoSolicitud !== 'reingreso') {
+      throw new BadRequestException(
+        'Esta solicitud corresponde a un reingreso y debe vincularse con la baja anterior antes de aprobarla.',
+      );
+    }
+    if (
+      jugadorCampeonato.tipoSolicitud === 'reingreso'
+      && (!jugadorCampeonato.habilitacionOrigenId || !jugadorCampeonato.motivoReingreso?.trim())
+    ) {
+      throw new BadRequestException('El reingreso no tiene completo su antecedente y motivo.');
+    }
+
     const inscripcionEquipo = await this.inscripcionRepo.findOne({
       where: {
         campeonatoId: jugadorCampeonato.campeonatoId,
@@ -648,7 +735,12 @@ export class JugadorCampeonatosService {
    * pueda registrar un nuevo jugador. Solo aplica a habilitaciones en estado 'habilitado'.
    * El registro queda con activo=false para conservar el historial.
    */
-  async darDeBaja(id: number, motivo: string, usuario: any): Promise<JugadorCampeonato> {
+  async darDeBaja(
+    id: number,
+    motivo: string,
+    usuario: any,
+    referencia?: string,
+  ): Promise<JugadorCampeonato> {
     if (usuario.role !== 'master' && usuario.role !== 'directivo_liga') {
       throw new ForbiddenException('Solo master o directivo_liga pueden dar de baja habilitaciones');
     }
@@ -675,7 +767,11 @@ export class JugadorCampeonatosService {
     // El estado pasa a 'baja' para diferenciarlo visualmente de un rechazo
     jugadorCampeonato.activo = false;
     jugadorCampeonato.estado = 'baja';
-    jugadorCampeonato.observaciones = motivo || 'Baja solicitada por administración';
+    jugadorCampeonato.fechaBaja = new Date();
+    jugadorCampeonato.dadoBajaPor = usuario.userId;
+    jugadorCampeonato.motivoBaja = motivo.trim();
+    jugadorCampeonato.referenciaBaja = referencia?.trim() || null;
+    jugadorCampeonato.observaciones = motivo.trim();
 
     return await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
   }
@@ -737,9 +833,161 @@ export class JugadorCampeonatosService {
       queryBuilder.andWhere('liga.id = :ligaId', { ligaId: usuario.ligaId });
     }
 
-    return await queryBuilder
+    const pendientes = await queryBuilder
       .orderBy('jc.fechaInscripcion', 'ASC')
       .getMany();
+    return this.adjuntarContextoReingreso(pendientes) as any;
+  }
+
+  async obtenerAntecedenteReingreso(
+    jugadorId: number,
+    campeonatoId: number,
+    equipoId: number,
+    usuario: any,
+  ): Promise<any> {
+    const campeonato = await this.getCampeonatoAutorizado(campeonatoId, usuario);
+    const equipo = await this.equipoRepo.findOne({ where: { id: equipoId } });
+    if (!equipo || equipo.ligaId !== campeonato.ligaId) {
+      throw new BadRequestException('El equipo no pertenece a la liga del campeonato');
+    }
+    if (usuario.role === 'dirigente_equipo' && usuario.equipoId !== equipoId) {
+      throw new ForbiddenException('No tienes permisos para consultar jugadores de otro equipo');
+    }
+
+    const antecedente = await this.buscarBajaAnterior(jugadorId, campeonatoId, equipoId);
+    return {
+      esReingreso: !!antecedente,
+      antecedente: antecedente ? {
+        id: antecedente.id,
+        numeroCancha: antecedente.numeroCancha,
+        fechaAprobacion: antecedente.fechaAprobacion,
+        fechaBaja: antecedente.fechaBaja,
+        motivoBaja: antecedente.motivoBaja || antecedente.observaciones,
+        referenciaBaja: antecedente.referenciaBaja,
+      } : null,
+    };
+  }
+
+  async obtenerResumenReingreso(id: number, usuario: any): Promise<any> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Solo master o directivo_liga pueden revisar reingresos');
+    }
+    const solicitud = await this.findOne(id, usuario);
+    const candidato = solicitud.habilitacionOrigenId
+      ? await this.jugadorCampeonatoRepo.findOne({ where: { id: solicitud.habilitacionOrigenId } })
+      : await this.buscarBajaAnterior(
+          solicitud.jugadorId,
+          solicitud.campeonatoId,
+          solicitud.equipoId,
+          solicitud.id,
+        );
+
+    const [golesAcumulados, sancionesActivas, transferenciasActivas] = await Promise.all([
+      this.golRepo.count({
+        where: {
+          jugadorId: solicitud.jugadorId,
+          campeonatoId: solicitud.campeonatoId,
+          activo: true,
+          tipo: Not('autogol'),
+        },
+      }),
+      this.sancionRepo.find({
+        where: {
+          jugadorId: solicitud.jugadorId,
+          campeonatoId: solicitud.campeonatoId,
+          suspensionActiva: true,
+          activo: true,
+        },
+        order: { fechaSancion: 'ASC' },
+      }),
+      this.transferenciaRepo.find({
+        where: {
+          jugadorId: solicitud.jugadorId,
+          campeonatoId: solicitud.campeonatoId,
+          activo: true,
+        },
+        order: { fechaSolicitud: 'DESC' },
+      }),
+    ]);
+
+    const transferenciasEnProceso = transferenciasActivas.filter(
+      (item) => item.estadoEquipoOrigen === 'pendiente' || item.estadoDirectivo === 'pendiente',
+    );
+
+    return {
+      solicitud,
+      esReingreso: solicitud.tipoSolicitud === 'reingreso' || !!candidato,
+      requiereRegularizacion: !!candidato && solicitud.tipoSolicitud !== 'reingreso',
+      antecedente: candidato,
+      golesAcumulados,
+      sancionesActivas: sancionesActivas.map((sancion) => ({
+        id: sancion.id,
+        tipo: sancion.tipoSancion?.nombre || 'Sancion',
+        descripcion: sancion.descripcion,
+        partidosSuspension: sancion.partidosSuspension || 0,
+        partidosCumplidos: sancion.partidosCumplidos || 0,
+        partidosPendientes: Math.max(
+          (sancion.partidosSuspension || 0) - (sancion.partidosCumplidos || 0),
+          0,
+        ),
+        fechaFinSuspension: sancion.fechaFinSuspension,
+      })),
+      transferenciasEnProceso,
+    };
+  }
+
+  async regularizarReingreso(
+    id: number,
+    dto: RegularizarReingresoDto,
+    usuario: any,
+  ): Promise<JugadorCampeonato> {
+    if (!['master', 'directivo_liga'].includes(usuario.role)) {
+      throw new ForbiddenException('Solo master o directivo_liga pueden regularizar reingresos');
+    }
+
+    const solicitud = await this.jugadorCampeonatoRepo.findOne({ where: { id } });
+    if (!solicitud) throw new NotFoundException('Solicitud no encontrada');
+    await this.assertCampeonatoAccess(solicitud.campeonato, usuario);
+    if (!solicitud.activo || !['pendiente', 'habilitado'].includes(solicitud.estado)) {
+      throw new BadRequestException('Solo se puede regularizar una solicitud activa');
+    }
+
+    const origen = await this.jugadorCampeonatoRepo.findOne({
+      where: { id: dto.habilitacionOrigenId },
+    });
+    if (
+      !origen
+      || origen.estado !== 'baja'
+      || origen.activo
+      || origen.jugadorId !== solicitud.jugadorId
+      || origen.campeonatoId !== solicitud.campeonatoId
+      || origen.equipoId !== solicitud.equipoId
+    ) {
+      throw new BadRequestException('La ficha seleccionada no es una baja anterior valida para este reingreso');
+    }
+
+    const enlaceExistente = await this.jugadorCampeonatoRepo.findOne({
+      where: { id: Not(id), habilitacionOrigenId: origen.id },
+    });
+    if (enlaceExistente) {
+      throw new BadRequestException('La baja anterior ya esta vinculada con otra solicitud de reingreso');
+    }
+
+    return this.dataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(JugadorCampeonato);
+      await repo.update(origen.id, {
+        fechaBaja: origen.fechaBaja || (dto.fechaBaja ? new Date(dto.fechaBaja) : null),
+        motivoBaja: origen.motivoBaja || dto.motivoBaja?.trim() || origen.observaciones,
+        referenciaBaja: origen.referenciaBaja || dto.referenciaBaja?.trim() || null,
+      });
+      await repo.update(solicitud.id, {
+        tipoSolicitud: 'reingreso',
+        habilitacionOrigenId: origen.id,
+        motivoReingreso: dto.motivoReingreso.trim(),
+        referenciaReingreso: dto.referenciaReingreso?.trim() || null,
+      });
+      return await repo.findOne({ where: { id: solicitud.id } }) as JugadorCampeonato;
+    });
   }
 
   async remove(id: number, usuario: any): Promise<void> {

@@ -10,6 +10,8 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
   let categoriaRepo: Record<string, jest.Mock>;
   let inscripcionRepo: Record<string, jest.Mock>;
   let transferenciaRepo: Record<string, jest.Mock>;
+  let sancionRepo: Record<string, jest.Mock>;
+  let golRepo: Record<string, jest.Mock>;
   let dataSource: { transaction: jest.Mock };
   let cambiosDorsalService: Record<string, jest.Mock>;
 
@@ -28,6 +30,8 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
     categoriaRepo = { findOne: jest.fn() };
     inscripcionRepo = { findOne: jest.fn() };
     transferenciaRepo = { findOne: jest.fn() };
+    sancionRepo = { find: jest.fn() };
+    golRepo = { count: jest.fn() };
     dataSource = { transaction: jest.fn() };
     cambiosDorsalService = {
       adjuntarCambiosActivos: jest.fn(async (items: any[]) => items),
@@ -42,7 +46,8 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
       categoriaRepo as any,
       inscripcionRepo as any,
       transferenciaRepo as any,
-      {} as any,
+      sancionRepo as any,
+      golRepo as any,
       dataSource as any,
       cambiosDorsalService as any,
     );
@@ -92,6 +97,7 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
     transferenciaRepo.findOne.mockResolvedValue(null);
     habilitacionRepo.findOne
       .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(rechazada)
       .mockResolvedValueOnce(reactivada);
     habilitacionRepo.count.mockResolvedValue(2);
@@ -112,7 +118,7 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
       { id: 77 },
       expect.objectContaining({ estado: 'pendiente', activo: true, solicitadoPor: 100 }),
     );
-    expect(habilitacionRepo.findOne.mock.calls[1][0].where).toEqual(
+    expect(habilitacionRepo.findOne.mock.calls[2][0].where).toEqual(
       expect.objectContaining({ estado: 'rechazado', activo: false, equipoId: 10 }),
     );
     expect(habilitacionRepo.create).not.toHaveBeenCalled();
@@ -120,6 +126,40 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
       expect.objectContaining({ numeroCancha: 12, excluirHabilitacionId: 77 }),
     );
     expect(result).toEqual(reactivada);
+  });
+
+  it('exige motivo cuando existe una baja anterior del mismo jugador y equipo', async () => {
+    campeonatoRepo.findOne.mockResolvedValue({
+      id: 5,
+      ligaId: 1,
+      activo: true,
+      estado: 'en_curso',
+    });
+    jugadorRepo.findOne.mockResolvedValue({ id: 4, equipoId: 10, activo: true });
+    equipoRepo.findOne.mockResolvedValue({ id: 10, ligaId: 1, activo: true });
+    inscripcionRepo.findOne.mockResolvedValue({ id: 30, estado: 'confirmada', activo: true });
+    categoriaRepo.findOne.mockResolvedValue({ id: 3, campeonatoId: 5, activo: true });
+    transferenciaRepo.findOne.mockResolvedValue(null);
+    habilitacionRepo.findOne
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: 50,
+        jugadorId: 4,
+        campeonatoId: 5,
+        equipoId: 10,
+        estado: 'baja',
+        activo: false,
+      });
+
+    await expect(service.create({
+      jugadorId: 4,
+      campeonatoId: 5,
+      equipoId: 10,
+      categoriaId: 3,
+      numeroCancha: 12,
+      posicion: 'Delantero',
+    }, { role: 'dirigente_equipo', equipoId: 10, userId: 100 }))
+      .rejects.toThrow('Debes indicar el motivo del reingreso');
   });
 
   it('vuelve a validar el cupo antes de aprobar', async () => {
@@ -144,6 +184,36 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
       service.aprobar(80, {}, { role: 'directivo_liga', ligaId: 1, userId: 200 }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
+    expect(habilitacionRepo.save).not.toHaveBeenCalled();
+  });
+
+  it('bloquea la aprobacion si una solicitud historica no fue vinculada como reingreso', async () => {
+    const pendiente = {
+      id: 81,
+      jugadorId: 4,
+      campeonatoId: 5,
+      equipoId: 10,
+      estado: 'pendiente',
+      tipoSolicitud: 'normal',
+      activo: true,
+      campeonato: { id: 5, ligaId: 1, maxJugadoresHabilitados: 20 },
+    };
+    habilitacionRepo.findOne
+      .mockResolvedValueOnce(pendiente)
+      .mockResolvedValueOnce({
+        id: 50,
+        jugadorId: 4,
+        campeonatoId: 5,
+        equipoId: 10,
+        estado: 'baja',
+        activo: false,
+      });
+
+    await expect(
+      service.aprobar(81, {}, { role: 'directivo_liga', ligaId: 1, userId: 200 }),
+    ).rejects.toThrow('debe vincularse con la baja anterior');
+
+    expect(inscripcionRepo.findOne).not.toHaveBeenCalled();
     expect(habilitacionRepo.save).not.toHaveBeenCalled();
   });
 });

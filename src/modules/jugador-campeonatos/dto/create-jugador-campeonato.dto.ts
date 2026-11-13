@@ -1,4 +1,4 @@
-import { IsNumber, IsString, IsNotEmpty, MaxLength, Min, Max } from 'class-validator';
+import { IsNumber, IsString, IsNotEmpty, IsOptional, MaxLength, Min, Max } from 'class-validator';
 
 export class CreateJugadorCampeonatoDto {
   @IsNumber()
@@ -27,4 +27,14 @@ export class CreateJugadorCampeonatoDto {
   @IsNotEmpty()
   @MaxLength(50)
   posicion: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  motivoReingreso?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  referenciaReingreso?: string;
 }

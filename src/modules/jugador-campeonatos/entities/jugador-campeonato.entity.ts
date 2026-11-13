@@ -72,6 +72,38 @@ export class JugadorCampeonato {
   @Column({ type: 'varchar', length: 500, nullable: true })
   observaciones: string | null;
 
+  @Column({ name: 'tipo_solicitud', type: 'varchar', length: 20, default: 'normal' })
+  tipoSolicitud: 'normal' | 'reingreso';
+
+  @Column({ name: 'habilitacion_origen_id', type: 'int', nullable: true })
+  habilitacionOrigenId: number | null;
+
+  @ManyToOne(() => JugadorCampeonato, { eager: false, nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'habilitacion_origen_id' })
+  habilitacionOrigen: JugadorCampeonato | null;
+
+  @Column({ name: 'motivo_reingreso', type: 'varchar', length: 500, nullable: true })
+  motivoReingreso: string | null;
+
+  @Column({ name: 'referencia_reingreso', type: 'varchar', length: 200, nullable: true })
+  referenciaReingreso: string | null;
+
+  @Column({ name: 'fecha_baja', type: 'timestamp', nullable: true })
+  fechaBaja: Date | null;
+
+  @Column({ name: 'dado_baja_por', type: 'int', nullable: true })
+  dadoBajaPor: number | null;
+
+  @ManyToOne(() => Usuario, { eager: false, nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'dado_baja_por' })
+  dadoBajaPorUsuario: Usuario | null;
+
+  @Column({ name: 'motivo_baja', type: 'varchar', length: 500, nullable: true })
+  motivoBaja: string | null;
+
+  @Column({ name: 'referencia_baja', type: 'varchar', length: 200, nullable: true })
+  referenciaBaja: string | null;
+
   @CreateDateColumn({ name: 'fecha_inscripcion' })
   fechaInscripcion: Date;
 

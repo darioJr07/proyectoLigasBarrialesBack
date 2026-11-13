@@ -16,6 +16,7 @@ import { CambioDorsalEtapa } from './entities/cambio-dorsal-etapa.entity';
 import { EtapaCompetencia } from '../partidos/entities/etapa-competencia.entity';
 import { Partido } from '../partidos/entities/partido.entity';
 import { CambiosDorsalService } from './cambios-dorsal.service';
+import { Gol } from '../goles/entities/gol.entity';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { CambiosDorsalService } from './cambios-dorsal.service';
       CambioDorsalEtapa,
       EtapaCompetencia,
       Partido,
+      Gol,
     ]),
   ],
   controllers: [JugadorCampeonatosController],

@@ -24,6 +24,8 @@ import { ModuloHabilitadoGuard } from '../configuracion/guards/modulo-habilitado
 import { RegistrarCambioDorsalDto } from './dto/registrar-cambio-dorsal.dto';
 import { AnularCambioDorsalDto } from './dto/anular-cambio-dorsal.dto';
 import { CambiosDorsalService } from './cambios-dorsal.service';
+import { DarDeBajaHabilitacionDto } from './dto/dar-de-baja-habilitacion.dto';
+import { RegularizarReingresoDto } from './dto/regularizar-reingreso.dto';
 
 @Controller('jugador-campeonatos')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -51,6 +53,31 @@ export class JugadorCampeonatosController {
   @Roles('master', 'directivo_liga')
   findPendientes(@Request() req: any) {
     return this.jugadorCampeonatosService.findPendientes(req.user);
+  }
+
+  @Get('jugador/:jugadorId/antecedente-reingreso')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  obtenerAntecedenteReingreso(
+    @Param('jugadorId', ParseIntPipe) jugadorId: number,
+    @Query('campeonatoId', ParseIntPipe) campeonatoId: number,
+    @Query('equipoId', ParseIntPipe) equipoId: number,
+    @Request() req: any,
+  ) {
+    return this.jugadorCampeonatosService.obtenerAntecedenteReingreso(
+      jugadorId,
+      campeonatoId,
+      equipoId,
+      req.user,
+    );
+  }
+
+  @Get(':id/resumen-reingreso')
+  @Roles('master', 'directivo_liga')
+  obtenerResumenReingreso(
+    @Param('id', ParseIntPipe) id: number,
+    @Request() req: any,
+  ) {
+    return this.jugadorCampeonatosService.obtenerResumenReingreso(id, req.user);
   }
 
   @Get(':id')
@@ -148,10 +175,20 @@ export class JugadorCampeonatosController {
   @Roles('master', 'directivo_liga')
   darDeBaja(
     @Param('id', ParseIntPipe) id: number,
-    @Body('motivo') motivo: string,
+    @Body() dto: DarDeBajaHabilitacionDto,
     @Request() req: any,
   ) {
-    return this.jugadorCampeonatosService.darDeBaja(id, motivo, req.user);
+    return this.jugadorCampeonatosService.darDeBaja(id, dto.motivo, req.user, dto.referencia);
+  }
+
+  @Patch(':id/regularizar-reingreso')
+  @Roles('master', 'directivo_liga')
+  regularizarReingreso(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RegularizarReingresoDto,
+    @Request() req: any,
+  ) {
+    return this.jugadorCampeonatosService.regularizarReingreso(id, dto, req.user);
   }
 
   @Get(':id/cambios-dorsal/opciones')
