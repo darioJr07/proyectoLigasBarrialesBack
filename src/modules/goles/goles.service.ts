@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
 import { Gol } from './entities/gol.entity';
@@ -7,6 +7,7 @@ import { Partido } from '../partidos/entities/partido.entity';
 import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
 import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
 import { CambiosDorsalService } from '../jugador-campeonatos/cambios-dorsal.service';
+import { ConsultarHistorialGolesDto } from './dto/consultar-historial-goles.dto';
 
 /**
  * Fila de la tabla de goleadores para un jugador.
@@ -21,6 +22,34 @@ export interface FilaGoleador {
   penales: number;   // De los totales, cuántos fueron penal
   autogoles: number; // Goles en contra (informativos, no suman al total del jugador)
   numeroCancha: number | null; // Número de camiseta de la habilitación del jugador
+}
+
+export interface HistorialGolItem {
+  id: number;
+  partidoId: number;
+  campeonatoId: number;
+  campeonatoNombre: string;
+  categoriaId: number;
+  categoriaNombre: string;
+  etapa: string;
+  jornada: number;
+  fechaPartido: Date | string | null;
+  horaPartido: string | null;
+  jugadorId: number;
+  jugadorNombre: string;
+  equipoJugadorId: number;
+  equipoJugadorNombre: string;
+  equipoBeneficiadoId: number;
+  equipoBeneficiadoNombre: string;
+  rivalId: number;
+  rivalNombre: string;
+  localNombre: string;
+  visitanteNombre: string;
+  golesLocal: number | null;
+  golesVisitante: number | null;
+  minuto: number | null;
+  tipo: 'normal' | 'penal' | 'autogol';
+  activo: boolean;
 }
 
 @Injectable()
@@ -259,6 +288,228 @@ export class GolesService {
       ...fila,
       numeroCancha: fila.numeroCancha,
     }));
+  }
+
+  /**
+   * Consulta paginada del historial individual de goles.
+   *
+   * El campo goles.equipo_id representa al equipo beneficiado. Para un
+   * autogol se reconstruye el equipo real del jugador usando los dos equipos
+   * del partido, evitando presentar el autogol como si perteneciera al rival.
+   */
+  async getHistorial(filtros: ConsultarHistorialGolesDto, usuario: any) {
+    if (filtros.fechaDesde && filtros.fechaHasta && filtros.fechaDesde > filtros.fechaHasta) {
+      throw new BadRequestException('La fecha desde no puede ser posterior a la fecha hasta.');
+    }
+    if (usuario.role !== 'master' && !usuario.ligaId) {
+      throw new ForbiddenException('El usuario no tiene una liga asociada.');
+    }
+
+    const base = this.golesRepository
+      .createQueryBuilder('gol')
+      .leftJoinAndSelect('gol.jugador', 'jugador')
+      .leftJoinAndSelect('gol.equipo', 'equipoBeneficiado')
+      .leftJoinAndSelect('gol.categoria', 'categoria')
+      .leftJoinAndSelect('gol.partido', 'partido')
+      .leftJoinAndSelect('partido.equipoLocal', 'equipoLocal')
+      .leftJoinAndSelect('partido.equipoVisitante', 'equipoVisitante')
+      .leftJoinAndSelect('partido.campeonato', 'campeonato')
+      .where('gol.campeonatoId = :campeonatoId', {
+        campeonatoId: filtros.campeonatoId,
+      });
+
+    if (filtros.categoriaId) {
+      base.andWhere('gol.categoriaId = :categoriaId', {
+        categoriaId: filtros.categoriaId,
+      });
+    }
+    if (usuario.role !== 'master') {
+      base.andWhere('campeonato.ligaId = :ligaUsuarioId', {
+        ligaUsuarioId: usuario.ligaId,
+      });
+    }
+
+    // Las opciones no dependen de los filtros avanzados para que un filtro
+    // seleccionado nunca desaparezca al aplicar la consulta.
+    const registrosParaOpciones = await base.clone().orderBy('gol.id', 'ASC').getMany();
+
+    const consulta = base.clone();
+    if (filtros.etapa) {
+      consulta.andWhere('partido.etapa = :etapa', { etapa: filtros.etapa });
+    }
+    if (filtros.jornada) {
+      consulta.andWhere('partido.jornada = :jornada', { jornada: filtros.jornada });
+    }
+    if (filtros.jugadorId) {
+      consulta.andWhere('gol.jugadorId = :jugadorId', { jugadorId: filtros.jugadorId });
+    }
+    if (filtros.tipo) {
+      consulta.andWhere('gol.tipo = :tipo', { tipo: filtros.tipo });
+    }
+    if (filtros.fechaDesde) {
+      consulta.andWhere('partido.fechaPartido >= :fechaDesde', {
+        fechaDesde: filtros.fechaDesde,
+      });
+    }
+    if (filtros.fechaHasta) {
+      consulta.andWhere('partido.fechaPartido <= :fechaHasta', {
+        fechaHasta: filtros.fechaHasta,
+      });
+    }
+    if (filtros.equipoId) {
+      consulta.andWhere(
+        `(
+          (gol.tipo <> 'autogol' AND gol.equipoId = :equipoId)
+          OR
+          (gol.tipo = 'autogol' AND (
+            (gol.equipoId = partido.equipoLocalId AND partido.equipoVisitanteId = :equipoId)
+            OR
+            (gol.equipoId = partido.equipoVisitanteId AND partido.equipoLocalId = :equipoId)
+          ))
+        )`,
+        { equipoId: filtros.equipoId },
+      );
+    }
+
+    const estado = filtros.estado ?? 'activos';
+    if (estado === 'activos') consulta.andWhere('gol.activo = true');
+    if (estado === 'inactivos') consulta.andWhere('gol.activo = false');
+
+    consulta
+      .orderBy('partido.fechaPartido', 'DESC', 'NULLS LAST')
+      .addOrderBy('partido.jornada', 'DESC')
+      .addOrderBy('gol.minuto', 'ASC', 'NULLS LAST')
+      .addOrderBy('gol.id', 'DESC');
+
+    const todosFiltrados = await consulta.clone().getMany();
+    const pagina = filtros.pagina ?? 1;
+    const limite = filtros.limite ?? 20;
+    const registrosPagina = await consulta
+      .clone()
+      .skip((pagina - 1) * limite)
+      .take(limite)
+      .getMany();
+
+    const items = registrosPagina.map((gol) => this.mapearHistorialGol(gol));
+    const total = todosFiltrados.length;
+
+    return {
+      items,
+      total,
+      pagina,
+      limite,
+      totalPaginas: total === 0 ? 0 : Math.ceil(total / limite),
+      resumen: {
+        registros: total,
+        golesJugador: todosFiltrados.filter((gol) => gol.tipo !== 'autogol').length,
+        penales: todosFiltrados.filter((gol) => gol.tipo === 'penal').length,
+        autogoles: todosFiltrados.filter((gol) => gol.tipo === 'autogol').length,
+      },
+      opciones: this.construirOpcionesHistorial(registrosParaOpciones),
+    };
+  }
+
+  private mapearHistorialGol(gol: Gol): HistorialGolItem {
+    const partido = gol.partido;
+    const equipoJugador = this.resolverEquipoJugador(gol);
+    const rival = equipoJugador?.id === partido?.equipoLocalId
+      ? partido?.equipoVisitante
+      : partido?.equipoLocal;
+
+    return {
+      id: gol.id,
+      partidoId: gol.partidoId,
+      campeonatoId: gol.campeonatoId,
+      campeonatoNombre: partido?.campeonato?.nombre ?? `Campeonato #${gol.campeonatoId}`,
+      categoriaId: gol.categoriaId,
+      categoriaNombre: gol.categoria?.nombre ?? partido?.categoria?.nombre ?? `Categoria #${gol.categoriaId}`,
+      etapa: partido?.etapa ?? '',
+      jornada: partido?.jornada ?? 0,
+      fechaPartido: partido?.fechaPartido ?? null,
+      horaPartido: partido?.horaPartido ?? null,
+      jugadorId: gol.jugadorId,
+      jugadorNombre: gol.jugador?.nombre ?? `Jugador #${gol.jugadorId}`,
+      equipoJugadorId: equipoJugador?.id ?? 0,
+      equipoJugadorNombre: equipoJugador?.nombre ?? 'Equipo no identificado',
+      equipoBeneficiadoId: gol.equipoId,
+      equipoBeneficiadoNombre: gol.equipo?.nombre ?? `Equipo #${gol.equipoId}`,
+      rivalId: rival?.id ?? 0,
+      rivalNombre: rival?.nombre ?? 'Rival no identificado',
+      localNombre: partido?.equipoLocal?.nombre ?? '',
+      visitanteNombre: partido?.equipoVisitante?.nombre ?? '',
+      golesLocal: partido?.golesLocal ?? null,
+      golesVisitante: partido?.golesVisitante ?? null,
+      minuto: gol.minuto,
+      tipo: gol.tipo,
+      activo: gol.activo,
+    };
+  }
+
+  private resolverEquipoJugador(gol: Gol): { id: number; nombre: string } | null {
+    if (gol.tipo !== 'autogol') {
+      return gol.equipo ? { id: gol.equipo.id, nombre: gol.equipo.nombre } : null;
+    }
+
+    const partido = gol.partido;
+    if (!partido) return null;
+    if (gol.equipoId === partido.equipoLocalId && partido.equipoVisitante) {
+      return { id: partido.equipoVisitante.id, nombre: partido.equipoVisitante.nombre };
+    }
+    if (gol.equipoId === partido.equipoVisitanteId && partido.equipoLocal) {
+      return { id: partido.equipoLocal.id, nombre: partido.equipoLocal.nombre };
+    }
+    return null;
+  }
+
+  private construirOpcionesHistorial(goles: Gol[]) {
+    const etapas = new Set<string>();
+    const jornadas = new Set<number>();
+    const jornadasPorEtapa = new Map<string, Set<number>>();
+    const equipos = new Map<number, string>();
+    const jugadores = new Map<number, { nombre: string; equipoIds: Set<number> }>();
+
+    for (const gol of goles) {
+      if (gol.partido?.etapa) etapas.add(gol.partido.etapa);
+      if (gol.partido?.jornada) {
+        jornadas.add(gol.partido.jornada);
+        if (gol.partido.etapa) {
+          if (!jornadasPorEtapa.has(gol.partido.etapa)) {
+            jornadasPorEtapa.set(gol.partido.etapa, new Set<number>());
+          }
+          jornadasPorEtapa.get(gol.partido.etapa)!.add(gol.partido.jornada);
+        }
+      }
+      const equipoJugador = this.resolverEquipoJugador(gol);
+      if (equipoJugador) equipos.set(equipoJugador.id, equipoJugador.nombre);
+      if (gol.jugador) {
+        if (!jugadores.has(gol.jugadorId)) {
+          jugadores.set(gol.jugadorId, {
+            nombre: gol.jugador.nombre,
+            equipoIds: new Set<number>(),
+          });
+        }
+        if (equipoJugador) jugadores.get(gol.jugadorId)!.equipoIds.add(equipoJugador.id);
+      }
+    }
+
+    return {
+      etapas: Array.from(etapas).sort((a, b) => a.localeCompare(b)),
+      jornadas: Array.from(jornadas).sort((a, b) => a - b),
+      jornadasPorEtapa: Object.fromEntries(
+        Array.from(jornadasPorEtapa, ([etapa, valores]) => [
+          etapa,
+          Array.from(valores).sort((a, b) => a - b),
+        ]),
+      ),
+      equipos: Array.from(equipos, ([id, nombre]) => ({ id, nombre }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre)),
+      jugadores: Array.from(jugadores, ([id, datos]) => ({
+        id,
+        nombre: datos.nombre,
+        equipoIds: Array.from(datos.equipoIds).sort((a, b) => a - b),
+      }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre)),
+    };
   }
 
   // ─────────────────────────────────────────────────────────────────────────

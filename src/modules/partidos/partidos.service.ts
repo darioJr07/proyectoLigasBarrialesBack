@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -20,6 +21,7 @@ import { EtapaGrupo } from './entities/etapa-grupo.entity';
 import { EtapaGrupoEquipo } from './entities/etapa-grupo-equipo.entity';
 import { EtapaGrupoBonificacion } from './entities/etapa-grupo-bonificacion.entity';
 import { GenerarFixtureDto, GrupoFixtureDto } from './dto/generar-fixture.dto';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
 
 @Injectable()
 export class PartidosService {
@@ -35,6 +37,7 @@ export class PartidosService {
     @InjectRepository(EtapaGrupoBonificacion) private bonificacionesEtapaRepository: Repository<EtapaGrupoBonificacion>,
     private readonly golesService: GolesService,
     private readonly sancionesService: SancionesService,
+    @Optional() private readonly notificacionesService?: NotificacionesService,
   ) {}
 
   async generarFixture(dto: GenerarFixtureDto, usuario: any) {
@@ -739,9 +742,17 @@ export class PartidosService {
       }
     }
 
+    const fechaAnterior = partido.fechaPartido ? String(partido.fechaPartido).slice(0, 10) : null;
+    const horaAnterior = partido.horaPartido ?? null;
+    const canchaAnterior = partido.cancha ?? null;
+    const teniaHorario = !!fechaAnterior || !!horaAnterior;
+    const cambiaProgramacion =
+      (dto.fechaPartido !== undefined && dto.fechaPartido !== fechaAnterior)
+      || (dto.horaPartido !== undefined && dto.horaPartido !== horaAnterior)
+      || (dto.cancha !== undefined && dto.cancha !== canchaAnterior);
     const pasaASuspendido = dto.estado === 'suspendido' && partido.estado !== 'suspendido';
     Object.assign(partido, dto);
-    return this.partidosRepository.manager.transaction(async (manager) => {
+    const guardado = await this.partidosRepository.manager.transaction(async (manager) => {
       const partidoGuardado = await manager.getRepository(Partido).save(partido);
       if (pasaASuspendido && partidoGuardado.equipoLocalId && partidoGuardado.equipoVisitanteId) {
         await this.sancionesService.procesarPartidoSuspendido(
@@ -754,6 +765,25 @@ export class PartidosService {
       }
       return partidoGuardado;
     });
+    if (cambiaProgramacion && (guardado.fechaPartido || guardado.horaPartido)) {
+      const fecha = guardado.fechaPartido ? String(guardado.fechaPartido).slice(0, 10) : 'fecha por definir';
+      const hora = guardado.horaPartido || 'hora por definir';
+      const cancha = guardado.cancha || 'cancha por definir';
+      await this.notificacionesService?.notificarEquipos(
+        [guardado.equipoLocalId, guardado.equipoVisitanteId],
+        {
+          tipo: teniaHorario ? 'programacion_reprogramada' : 'programacion_confirmada',
+          titulo: teniaHorario ? 'Horario de partido modificado' : 'Horario de partido confirmado',
+          mensaje: `${guardado.equipoLocal?.nombre ?? 'Local'} vs ${guardado.equipoVisitante?.nombre ?? 'Visitante'}: ${fecha} a las ${hora}, ${cancha}.`,
+          ligaId: guardado.campeonato?.ligaId ?? null,
+          ruta: '/partidos',
+          referenciaTipo: 'partido',
+          referenciaId: guardado.id,
+          claveEvento: `partido:${guardado.id}:programacion:${Date.now()}`,
+        },
+      );
+    }
+    return guardado;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -786,6 +816,10 @@ export class PartidosService {
       throw new BadRequestException(
         'No se puede registrar resultado de un partido cancelado.',
       );
+    }
+
+    if (dto.autoresGoles?.length) {
+      await this.validarAutoresConAlineacion(partido, dto.autoresGoles);
     }
 
     // Capturamos si el partido YA estaba jugado ANTES de modificarlo.
@@ -856,6 +890,48 @@ export class PartidosService {
 
       return partidoGuardado;
     });
+  }
+
+  private async validarAutoresConAlineacion(
+    partido: Partido,
+    autores: NonNullable<RegistrarResultadoDto['autoresGoles']>,
+  ): Promise<void> {
+    const equiposPermitidos = new Set([partido.equipoLocalId, partido.equipoVisitanteId]);
+    const equipoInvalido = autores.find((autor) => !equiposPermitidos.has(autor.equipoDelJugadorId));
+    if (equipoInvalido) {
+      throw new BadRequestException(
+        `El equipo indicado para el jugador ID ${equipoInvalido.jugadorId} no participa en este partido.`,
+      );
+    }
+
+    const alineacion = await this.actaRepository.find({
+      where: { partidoId: partido.id, activo: true },
+    });
+
+    // Compatibilidad con partidos históricos que fueron cargados antes del acta digital.
+    if (alineacion.length === 0) return;
+
+    const participantes = new Set(
+      alineacion
+        .filter((registro) => registro.estado === 'jugo' || registro.estado === 'expulsado')
+        .map((registro) => `${registro.jugadorId}:${registro.equipoId}`),
+    );
+    const autoresInvalidos = [
+      ...new Set(
+        autores
+          .filter(
+            (autor) =>
+              !participantes.has(`${autor.jugadorId}:${autor.equipoDelJugadorId}`),
+          )
+          .map((autor) => autor.jugadorId),
+      ),
+    ];
+
+    if (autoresInvalidos.length > 0) {
+      throw new BadRequestException(
+        `Los siguientes goleadores no constan en la planilla como "Jugó" o "Jugó y fue expulsado": IDs ${autoresInvalidos.join(', ')}.`,
+      );
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────

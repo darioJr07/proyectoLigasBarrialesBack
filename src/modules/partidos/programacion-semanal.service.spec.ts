@@ -320,4 +320,61 @@ describe('ProgramacionSemanalService - programaciones confirmadas', () => {
       estado: 'pendiente',
     });
   });
+
+  it('notifica a ambos equipos cuando se confirma el horario de un partido', async () => {
+    const partido: any = {
+      id: 601,
+      estado: 'programado',
+      activo: true,
+      equipoLocalId: 11,
+      equipoVisitanteId: 12,
+      equipoLocal: { nombre: 'Equipo Local' },
+      equipoVisitante: { nombre: 'Equipo Visitante' },
+    };
+    const bolilla: any = {
+      id: 91,
+      numero: 1,
+      partidoId: 601,
+      estado: 'asignada',
+      fecha: '2026-11-28',
+      hora: '14:00',
+      cancha: 'Cancha central',
+      solicitudHorarioId: null,
+    };
+    const manager = {
+      findOne: jest.fn().mockResolvedValue(partido),
+      save: jest.fn(async (_entidad: any, valor: any) => valor),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    const notificaciones = { notificarEquipos: jest.fn().mockResolvedValue(2) };
+    const service = new ProgramacionSemanalService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      { find: jest.fn().mockResolvedValue([]) } as any,
+      {} as any,
+      { transaction: jest.fn(async (callback: any) => callback(manager)) } as any,
+      notificaciones as any,
+    );
+    jest.spyOn(service, 'detalle').mockResolvedValue({
+      id: 60,
+      ligaId: 2,
+      estado: 'en_sorteo',
+      partidos: [partido],
+      bolillas: [bolilla],
+    } as any);
+
+    await service.confirmar(60, { role: 'master' });
+
+    expect(notificaciones.notificarEquipos).toHaveBeenCalledWith(
+      [11, 12],
+      expect.objectContaining({
+        tipo: 'programacion_confirmada',
+        referenciaId: 601,
+        claveEvento: 'programacion:60:partido:601:confirmada',
+      }),
+    );
+  });
 });

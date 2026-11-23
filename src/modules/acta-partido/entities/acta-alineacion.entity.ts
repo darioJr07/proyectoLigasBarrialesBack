@@ -5,6 +5,7 @@ import {
   ManyToOne,
   JoinColumn,
   CreateDateColumn,
+  Index,
 } from 'typeorm';
 import { Partido } from '../../partidos/entities/partido.entity';
 import { Equipo } from '../../equipos/entities/equipo.entity';
@@ -24,6 +25,7 @@ import { Campeonato } from '../../campeonatos/entities/campeonato.entity';
  *  - expulsado   → fue expulsado durante el partido (jugó al menos un tramo)
  */
 @Entity('acta_alineacion')
+@Index('uq_acta_alineacion_partido_jugador', ['partidoId', 'jugadorId'], { unique: true })
 export class ActaAlineacion {
   @PrimaryGeneratedColumn()
   id: number;

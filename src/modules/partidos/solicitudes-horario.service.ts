@@ -1,10 +1,11 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { Partido } from './entities/partido.entity';
 import { SolicitudHorario } from './entities/solicitud-horario.entity';
 import { CrearSolicitudHorarioDto, ResolverSolicitudHorarioDto } from './dto/solicitud-horario.dto';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
 
 @Injectable()
 export class SolicitudesHorarioService {
@@ -12,6 +13,7 @@ export class SolicitudesHorarioService {
     @InjectRepository(SolicitudHorario) private readonly solicitudes: Repository<SolicitudHorario>,
     @InjectRepository(Partido) private readonly partidos: Repository<Partido>,
     @InjectRepository(Campeonato) private readonly campeonatos: Repository<Campeonato>,
+    @Optional() private readonly notificacionesService?: NotificacionesService,
   ) {}
 
   async crear(dto: CrearSolicitudHorarioDto, usuario: any) {
@@ -44,7 +46,7 @@ export class SolicitudesHorarioService {
       throw new BadRequestException('El equipo ya utilizó o mantiene una solicitud reglamentaria activa en esta etapa.');
     }
 
-    return this.solicitudes.save(this.solicitudes.create({
+    const guardada = await this.solicitudes.save(this.solicitudes.create({
       ligaId: campeonato.ligaId,
       campeonatoId: dto.campeonatoId,
       categoriaId: dto.categoriaId,
@@ -63,6 +65,22 @@ export class SolicitudesHorarioService {
       observacionResolucion: null,
       resueltoEn: null,
     }));
+    const nombreEquipo = partido.equipoLocalId === dto.equipoId
+      ? partido.equipoLocal?.nombre
+      : partido.equipoVisitante?.nombre;
+    await this.notificacionesService?.notificarAdministradoresLiga({
+      tipo: 'solicitud_horario_creada',
+      titulo: 'Nueva solicitud de horario',
+      mensaje: `${nombreEquipo ?? 'Un equipo'} solicitó un horario reglamentario para la jornada ${partido.jornada}.`,
+      ligaId: campeonato.ligaId,
+      equipoId: dto.equipoId,
+      ruta: '/partidos/solicitudes-horario',
+      referenciaTipo: 'solicitud_horario',
+      referenciaId: guardada.id,
+      claveEvento: `solicitud-horario:${guardada.id}:creada`,
+      excluirUsuarioId: usuario?.userId ?? usuario?.id,
+    });
+    return guardada;
   }
 
   async listar(
@@ -117,7 +135,20 @@ export class SolicitudesHorarioService {
     solicitud.observacionResolucion = dto.observacion?.trim() || null;
     solicitud.resueltoPor = usuario.id ?? usuario.userId ?? null;
     solicitud.resueltoEn = new Date();
-    return this.solicitudes.save(solicitud);
+    const guardada = await this.solicitudes.save(solicitud);
+    const estado = guardada.estado as 'aprobada' | 'rechazada' | 'cancelada';
+    await this.notificacionesService?.notificarEquipo(guardada.equipoId, {
+      tipo: `solicitud_horario_${estado}`,
+      titulo: `Solicitud de horario ${estado}`,
+      mensaje: `La solicitud de horario para la jornada ${guardada.partido?.jornada ?? ''} fue ${estado}.${guardada.observacionResolucion ? ` Observación: ${guardada.observacionResolucion}` : ''}`,
+      ligaId: guardada.ligaId,
+      equipoId: guardada.equipoId,
+      ruta: '/partidos/solicitudes-horario',
+      referenciaTipo: 'solicitud_horario',
+      referenciaId: guardada.id,
+      claveEvento: `solicitud-horario:${guardada.id}:${estado}`,
+    });
+    return guardada;
   }
 
   async aprobadasParaPartidos(partidoIds: number[]): Promise<SolicitudHorario[]> {

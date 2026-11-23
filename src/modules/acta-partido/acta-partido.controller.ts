@@ -10,6 +10,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { ActaPartidoService } from './acta-partido.service';
 import { GuardarAlineacionDto } from './dto/guardar-alineacion.dto';
 import { GuardarInformePartidoDto } from './dto/guardar-informe-partido.dto';
@@ -29,7 +31,7 @@ import { ResolverIncidenciaDto } from './dto/resolver-incidencia.dto';
  * GET /acta-partido/:partidoId                        → Alineación ya guardada
  */
 @Controller('acta-partido')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class ActaPartidoController {
   constructor(private readonly actaService: ActaPartidoService) {}
 
@@ -46,6 +48,7 @@ export class ActaPartidoController {
    * Roles: master, directivo_liga
    */
   @Get('campeonato/:campeonatoId/incidencias')
+  @Roles('master', 'directivo_liga', 'tribuna_penas')
   listarIncidenciasPendientes(
     @Param('campeonatoId', ParseIntPipe) campeonatoId: number,
     @Request() req: any,
@@ -62,6 +65,7 @@ export class ActaPartidoController {
    * Roles: master, directivo_liga
    */
   @Put('incidencias/:incidenciaId/resolver')
+  @Roles('master', 'directivo_liga', 'tribuna_penas')
   resolverIncidencia(
     @Param('incidenciaId', ParseIntPipe) incidenciaId: number,
     @Body() dto: ResolverIncidenciaDto,
@@ -80,6 +84,7 @@ export class ActaPartidoController {
    * Útil para pre-llenar el acta antes de editarla manualmente.
    */
   @Get(':partidoId/jugadores-disponibles')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   obtenerJugadoresDisponibles(
     @Param('partidoId', ParseIntPipe) partidoId: number,
     @Request() req: any,
@@ -93,6 +98,7 @@ export class ActaPartidoController {
    * Retorna el informe del vocal del partido más las incidencias registradas.
    */
   @Get(':partidoId/informe')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   obtenerInforme(
     @Param('partidoId', ParseIntPipe) partidoId: number,
     @Request() req: any,
@@ -109,6 +115,7 @@ export class ActaPartidoController {
    * Roles: master, directivo_liga
    */
   @Put(':partidoId/informe')
+  @Roles('master', 'directivo_liga')
   guardarInforme(
     @Param('partidoId', ParseIntPipe) partidoId: number,
     @Body() dto: GuardarInformePartidoDto,
@@ -123,6 +130,7 @@ export class ActaPartidoController {
    * Retorna la alineación ya guardada de un partido, agrupada por equipo.
    */
   @Get(':partidoId')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo', 'tribuna_penas', 'tesoreria')
   obtenerAlineacion(
     @Param('partidoId', ParseIntPipe) partidoId: number,
     @Request() req: any,
@@ -138,6 +146,7 @@ export class ActaPartidoController {
    * Roles: master, directivo_liga
    */
   @Put(':partidoId/alineacion')
+  @Roles('master', 'directivo_liga')
   guardarAlineacion(
     @Param('partidoId', ParseIntPipe) partidoId: number,
     @Body() dto: GuardarAlineacionDto,

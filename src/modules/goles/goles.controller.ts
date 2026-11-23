@@ -3,10 +3,14 @@ import {
   Get,
   Query,
   ParseIntPipe,
+  Request,
   UseGuards,
 } from '@nestjs/common';
 import { GolesService, FilaGoleador } from './goles.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { ConsultarHistorialGolesDto } from './dto/consultar-historial-goles.dto';
 
 /**
  * Controlador de Goles
@@ -23,7 +27,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
  * Esto garantiza que los goles siempre estén sincronizados con el marcador.
  */
 @Controller('goles')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 export class GolesController {
   constructor(private readonly golesService: GolesService) {}
 
@@ -37,6 +41,20 @@ export class GolesController {
     @Query('categoriaId', ParseIntPipe) categoriaId: number,
   ): Promise<FilaGoleador[]> {
     return this.golesService.getGoleadoresPorCategoria(campeonatoId, categoriaId);
+  }
+
+  /**
+   * Historial individual de goles con filtros y paginacion.
+   * El master puede consultar cualquier liga; los demas roles quedan
+   * restringidos a la liga asociada a su usuario.
+   */
+  @Get('historial')
+  @Roles('master', 'directivo_liga', 'dirigente_equipo')
+  getHistorial(
+    @Query() filtros: ConsultarHistorialGolesDto,
+    @Request() req: any,
+  ) {
+    return this.golesService.getHistorial(filtros, req.user);
   }
 
   /**

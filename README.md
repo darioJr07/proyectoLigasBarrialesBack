@@ -2,7 +2,7 @@
 
 API REST construida con NestJS, TypeScript, PostgreSQL y TypeORM.
 
-**Estado de documentacion:** actualizado el 15/10/2026.
+**Estado de documentacion:** actualizado el 21/11/2026.
 Para el estado funcional completo del sistema, revisar [../ESTADO_ACTUAL_PROYECTO.md](../ESTADO_ACTUAL_PROYECTO.md).
 
 Actualizacion 12/11/2026: `jugador-campeonatos` distingue solicitudes normales y reingresos posteriores a una baja. Conserva ambas fichas, registra auditoria de la baja, permite regularizar solicitudes historicas y bloquea la aprobacion de reingresos no vinculados. La estructura se incorpora mediante `1750300000000-AddReingresoJugadorCampeonato.ts`.
@@ -34,6 +34,7 @@ Actualizacion 12/11/2026: `jugador-campeonatos` distingue solicitudes normales y
 - `transferencias`: doble aprobacion de transferencias.
 - `partidos`: fixture, partidos y resultados.
 - `goles`: registro de goles.
+- `reportes`: consultas de solo lectura por campeonato, equipo y jugador, protegidas por rol, liga y pertenencia del dirigente.
 - `acta-partido`: acta, alineacion, informe e incidencias.
 - `sanciones`: reglas, sanciones, apelaciones y arrastres.
 - `tesoreria`: cobros, movimientos, cuenta consolidada, libro de caja, configuración de vocalía, inicio operativo, conciliaciones y cierre definitivo por campeonato.
@@ -139,14 +140,18 @@ npm run test:cov
 
 ## Testing
 
-Existe una primera cobertura automatizada para los flujos críticos de jugadores, habilitaciones, transferencias, usuarios y cierre operativo:
+Existe cobertura automatizada para los flujos criticos de jugadores, habilitaciones, reingresos, cambios de dorsal, transferencias, usuarios, programacion semanal, solicitudes de horario, sanciones, goleadores y cierre operativo:
 
 - `jugadores.service.spec.ts`: alcance de Master, directivo y dirigente.
 - `jugador-campeonatos.service.spec.ts`: acceso por campeonato, reutilización de rechazos y revalidación de cupo.
 - `transferencias.service.spec.ts`: bloqueo de solicitudes simultáneas, historial de rechazos y conclusión transaccional.
 - `usuarios.service.spec.ts`: permisos de cambio de contraseña según usuario y rol.
 - `modulo-habilitado.guard.spec.ts`: bypass administrativo y permiso/bloqueo del dirigente según la configuración vigente.
-- Resultado del 15/10/2026: 5 suites y 22 pruebas aprobadas.
+- `acta-partido.service.spec.ts`: permisos de escritura, duplicados, motivo de corrección, transacción e historial compatible con cambios posteriores de equipo.
+- `partidos-alineacion-goleadores.spec.ts`: goleadores participantes, jugador que no jugó y compatibilidad histórica sin planilla digital.
+- Las suites adicionales cubren reingresos, dorsales por etapa, programacion semanal, solicitudes de horario, sanciones, continuidad e historial de goleadores.
+- `notificaciones.service.spec.ts` y las pruebas integradas verifican aislamiento por usuario, destinatarios por liga/equipo, solicitudes de horario, programacion semanal y sanciones vinculadas al equipo actual del jugador.
+- Resultado del 22/11/2026: 14 suites y 72 pruebas aprobadas.
 - Las pruebas usan mocks; no acceden a la base de datos y `tsconfig.build.json` excluye `**/*spec.ts` del build productivo.
 
 Ejecución completa:
@@ -155,13 +160,15 @@ Ejecución completa:
 npm test -- --runInBand
 ```
 
-La cobertura integral y E2E continúa como mejora futura.
+La cobertura integral de integracion y E2E queda aplazada para la certificacion final del proyecto.
 
 ## Auditoría de integridad
 
 El archivo `audits/jugadores-habilitaciones-transferencias.sql` contiene únicamente consultas `SELECT` para detectar duplicidad de habilitaciones activas, dorsales repetidos, transferencias simultáneas e inconsistencias de equipo. La ejecución del 15/10/2026 no detectó novedades.
 
-Se mantiene `DB_SYNCHRONIZE=true` por decisión operativa. No se agregó una migración de índices para estos flujos; esa protección queda aplazada hasta adoptar una estrategia formal de migraciones.
+La auditoria integral del 19/11/2026 se encuentra en `audits/integridad-deportiva.sql` y cubre ademas reingresos, cambios de dorsal, sanciones, aplazados, programacion semanal, vocalias, actas y goles. Puede ejecutarse con `node audits/run-readonly-audit.js audits/integridad-deportiva.sql`; el ejecutor fuerza una transaccion `READ ONLY`, rechaza instrucciones de escritura y finaliza con `ROLLBACK`. El informe esta documentado en `../AUDITORIA_INTEGRIDAD_DEPORTIVA_NOVIEMBRE_2026.md`.
+
+Se mantiene `DB_SYNCHRONIZE=true` por decisión operativa. Para el acta digital también existe la migración `1750400000000-CreateActaAlineacionHistorial.ts`, que crea el historial de correcciones y el índice único por partido/jugador; con sincronización activa TypeORM crea la misma estructura desde las entidades.
 
 ## Documentacion Relacionada
 
@@ -169,5 +176,7 @@ Se mantiene `DB_SYNCHRONIZE=true` por decisión operativa. No se agregó una mig
 - [Verificacion de tablas](../VERIFICACION_TABLAS_BD.md)
 - [Inicializacion automatica](../INICIALIZACION_AUTOMATICA.md)
 - [Modulo de Tesoreria](../MODULO_TESORERIA_RESUMEN.md)
+- [Historial detallado de goles](../HISTORIAL_GOLES_IMPLEMENTACION_NOVIEMBRE_2026.md)
+- [Centro interno de notificaciones](../NOTIFICACIONES_IMPLEMENTACION_NOVIEMBRE_2026.md)
 - [Upload de imagenes](../UPLOAD_SYSTEM.md)
 - [Cloudinary](../CONFIGURACION_CLOUDINARY.md)

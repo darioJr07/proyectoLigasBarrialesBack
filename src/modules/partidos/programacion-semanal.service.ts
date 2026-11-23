@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Brackets, DataSource, In, Repository } from 'typeorm';
 import { randomInt } from 'crypto';
@@ -12,6 +12,7 @@ import { VocaliaPartido } from './entities/vocalia-partido.entity';
 import { SolicitudHorario } from './entities/solicitud-horario.entity';
 import { ProgramacionSeleccion } from './entities/programacion-seleccion.entity';
 import { SeleccionProgramacionDto } from './dto/crear-programacion-semanal.dto';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
 
 @Injectable()
 export class ProgramacionSemanalService {
@@ -24,6 +25,7 @@ export class ProgramacionSemanalService {
     @InjectRepository(SolicitudHorario) private readonly solicitudesHorario: Repository<SolicitudHorario>,
     @InjectRepository(ProgramacionSeleccion) private readonly selecciones: Repository<ProgramacionSeleccion>,
     private readonly dataSource: DataSource,
+    @Optional() private readonly notificacionesService?: NotificacionesService,
   ) {}
 
   async crear(dto: CrearProgramacionSemanalDto, usuario: any) {
@@ -314,7 +316,36 @@ export class ProgramacionSemanalService {
         totalPartidos: partidosProgramables.length,
       });
     });
+    await this.notificarProgramacionConfirmada(id, detalle.ligaId, asignadas, partidosProgramables);
     return this.detalle(id, usuario);
+  }
+
+  private async notificarProgramacionConfirmada(
+    programacionId: number,
+    ligaId: number,
+    asignadas: ProgramacionBolilla[],
+    partidos: Partido[],
+  ): Promise<void> {
+    const partidosPorId = new Map(partidos.map(partido => [partido.id, partido]));
+    for (const bolilla of asignadas) {
+      const partido = bolilla.partidoId ? partidosPorId.get(bolilla.partidoId) : undefined;
+      if (!partido) continue;
+      const fecha = String(bolilla.fecha).slice(0, 10);
+      const equipos = `${partido.equipoLocal?.nombre ?? 'Local'} vs ${partido.equipoVisitante?.nombre ?? 'Visitante'}`;
+      await this.notificacionesService?.notificarEquipos(
+        [partido.equipoLocalId, partido.equipoVisitanteId],
+        {
+          tipo: 'programacion_confirmada',
+          titulo: 'Horario de partido confirmado',
+          mensaje: `${equipos}: ${fecha} a las ${bolilla.hora}, ${bolilla.cancha}.`,
+          ligaId,
+          ruta: '/partidos',
+          referenciaTipo: 'partido',
+          referenciaId: partido.id,
+          claveEvento: `programacion:${programacionId}:partido:${partido.id}:confirmada`,
+        },
+      );
+    }
   }
 
   async cancelar(id: number, usuario: any) {

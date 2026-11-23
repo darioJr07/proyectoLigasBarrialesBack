@@ -7,17 +7,19 @@ describe('SancionesService - sanciones despues de una transferencia', () => {
   let excluidoRepo: Record<string, jest.Mock>;
   let habilitacionRepo: Record<string, jest.Mock>;
   let actaRepo: Record<string, jest.Mock>;
+  let notificaciones: Record<string, jest.Mock>;
 
   beforeEach(() => {
-    sancionRepo = { find: jest.fn(), save: jest.fn(async (valor) => valor) };
+    sancionRepo = { find: jest.fn(), findOne: jest.fn(), save: jest.fn(async (valor) => valor) };
     cumplidoRepo = {
       findOne: jest.fn().mockResolvedValue(null),
       create: jest.fn((valor) => valor),
       save: jest.fn(async (valor) => valor),
     };
     excluidoRepo = { findOne: jest.fn().mockResolvedValue(null) };
-    habilitacionRepo = { find: jest.fn() };
+    habilitacionRepo = { find: jest.fn(), findOne: jest.fn() };
     actaRepo = { find: jest.fn().mockResolvedValue([]) };
+    notificaciones = { notificarEquipo: jest.fn().mockResolvedValue(1) };
 
     service = new SancionesService(
       {} as any,
@@ -34,7 +36,30 @@ describe('SancionesService - sanciones despues de una transferencia', () => {
           new Map(habilitaciones.map(item => [item.id, item.numeroCancha])),
         ),
       } as any,
+      notificaciones as any,
     );
+  });
+
+  it('avisa al equipo actual del jugador aunque la sancion conserve el equipo de origen', async () => {
+    sancionRepo.findOne.mockResolvedValue({
+      id: 9,
+      ligaId: 2,
+      campeonatoId: 1,
+      jugadorId: 7,
+      equipoId: 10,
+      partidosSuspension: 2,
+      jugador: { nombre: 'Jugador Transferido' },
+      tipoSancion: { nombre: 'Expulsion' },
+    });
+    habilitacionRepo.findOne.mockResolvedValue({ equipoId: 20 });
+
+    await (service as any).notificarSancion(9, 'registrada');
+
+    expect(notificaciones.notificarEquipo).toHaveBeenCalledWith(20, expect.objectContaining({
+      tipo: 'sancion_registrada',
+      referenciaId: 9,
+      equipoId: 20,
+    }));
   });
 
   it('cuenta el partido del equipo actual sin cambiar el equipo de origen de la sancion', async () => {

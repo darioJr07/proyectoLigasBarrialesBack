@@ -28,6 +28,8 @@ import { PublicoModule } from './modules/publico/publico.module';
 import { ConfiguracionSistema } from './modules/configuracion/entities/configuracion-sistema.entity';
 import { Rol } from './modules/auth/entities/rol.entity';
 import { Usuario } from './modules/auth/entities/usuario.entity';
+import { ReportesModule } from './modules/reportes/reportes.module';
+import { NotificacionesModule } from './modules/notificaciones/notificaciones.module';
 
 /**
  * Módulo raíz de la aplicación
@@ -71,6 +73,8 @@ import { Usuario } from './modules/auth/entities/usuario.entity';
     DerramasModule,
     DashboardModule,
     PublicoModule,
+    ReportesModule,
+    NotificacionesModule,
   ],
   controllers: [HealthController],
   providers: [DatabaseSeedService],

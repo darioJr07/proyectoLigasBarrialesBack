@@ -27,13 +27,26 @@ describe('SolicitudesHorarioService', () => {
       }),
     };
     const campeonatos = { findOne: jest.fn().mockResolvedValue({ id: 10, ligaId: 2, activo: true }) };
-    return { service: new SolicitudesHorarioService(solicitudes as any, partidos as any, campeonatos as any) };
+    const notificaciones = {
+      notificarAdministradoresLiga: jest.fn().mockResolvedValue(1),
+      notificarEquipo: jest.fn().mockResolvedValue(1),
+    };
+    return {
+      service: new SolicitudesHorarioService(solicitudes as any, partidos as any, campeonatos as any, notificaciones as any),
+      notificaciones,
+    };
   }
 
   it('registra una solicitud pendiente para el equipo del dirigente', async () => {
-    const { service } = construir();
+    const { service, notificaciones } = construir();
     const resultado = await service.crear(dto, { id: 7, role: 'dirigente_equipo', ligaId: 2, equipoId: 20 });
     expect(resultado).toEqual(expect.objectContaining({ estado: 'pendiente', equipoId: 20, partidoId: 100 }));
+    expect(notificaciones.notificarAdministradoresLiga).toHaveBeenCalledWith(expect.objectContaining({
+      tipo: 'solicitud_horario_creada',
+      ligaId: 2,
+      referenciaId: 1,
+      excluirUsuarioId: 7,
+    }));
   });
 
   it('impide que un dirigente solicite por otro equipo', async () => {
@@ -53,9 +66,14 @@ describe('SolicitudesHorarioService', () => {
     const solicitudes = { findOne: jest.fn().mockResolvedValue(solicitud), save: jest.fn(async (data: any) => data) };
     const partidos = { findOne: jest.fn().mockResolvedValue({ id: 100, estado: 'programado', fechaPartido: null, horaPartido: null }) };
     const campeonatos = { findOne: jest.fn().mockResolvedValue({ id: 10, ligaId: 2, activo: true }) };
-    const service = new SolicitudesHorarioService(solicitudes as any, partidos as any, campeonatos as any);
+    const notificaciones = { notificarEquipo: jest.fn().mockResolvedValue(1) };
+    const service = new SolicitudesHorarioService(solicitudes as any, partidos as any, campeonatos as any, notificaciones as any);
     const resultado = await service.resolver(4, { decision: 'aprobar' }, { id: 2, role: 'directivo_liga', ligaId: 2 });
     expect(resultado.estado).toBe('aprobada');
     expect(resultado.resueltoPor).toBe(2);
+    expect(notificaciones.notificarEquipo).toHaveBeenCalledWith(20, expect.objectContaining({
+      tipo: 'solicitud_horario_aprobada',
+      referenciaId: 4,
+    }));
   });
 });

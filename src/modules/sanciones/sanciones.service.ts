@@ -3,6 +3,8 @@ import {
   NotFoundException,
   BadRequestException,
   ForbiddenException,
+  Logger,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
@@ -23,9 +25,12 @@ import { SancionPartidoExcluido } from './entities/sancion-partido-excluido.enti
 import { Partido } from '../partidos/entities/partido.entity';
 import { AplicarReparacionSancionesDto } from './dto/aplicar-reparacion-sanciones.dto';
 import { CambiosDorsalService } from '../jugador-campeonatos/cambios-dorsal.service';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
 
 @Injectable()
 export class SancionesService {
+  private readonly logger = new Logger(SancionesService.name);
+
   constructor(
     @InjectRepository(TipoSancion)
     private tipoSancionRepo: Repository<TipoSancion>,
@@ -46,7 +51,67 @@ export class SancionesService {
     @InjectRepository(Campeonato)
     private campeonatoRepo: Repository<Campeonato>,
     private readonly cambiosDorsalService: CambiosDorsalService,
+    @Optional() private readonly notificacionesService?: NotificacionesService,
   ) {}
+
+  private async notificarSancion(
+    sancionId: number,
+    evento: 'registrada' | 'actualizada' | 'resuelta' | 'anulada',
+  ): Promise<void> {
+    if (!this.notificacionesService) return;
+    try {
+      const sancion = await this.sancionRepo.findOne({ where: { id: sancionId } });
+      if (!sancion) return;
+      let equipoId = sancion.equipoId;
+      if (sancion.jugadorId) {
+        const habilitacionActual = await this.jugadorCampeonatoRepo.findOne({
+          where: {
+            jugadorId: sancion.jugadorId,
+            campeonatoId: sancion.campeonatoId,
+            estado: 'habilitado',
+            activo: true,
+          },
+          order: { id: 'DESC' },
+        });
+        equipoId = habilitacionActual?.equipoId ?? equipoId;
+      }
+      if (!equipoId) return;
+
+      const afectado = sancion.jugador?.nombre ?? sancion.equipo?.nombre ?? 'el integrante de tu equipo';
+      const tipo = sancion.tipoSancion?.nombre ?? 'sanción disciplinaria';
+      const titulos = {
+        registrada: 'Nueva sanción registrada',
+        actualizada: 'Sanción actualizada',
+        resuelta: 'Resolución de sanción registrada',
+        anulada: 'Sanción anulada',
+      };
+      const acciones = {
+        registrada: 'Se registró',
+        actualizada: 'Se actualizó',
+        resuelta: 'Se emitió una resolución sobre',
+        anulada: 'Se anuló',
+      };
+      const suspension = sancion.partidosSuspension > 0
+        ? ` Suspensión: ${sancion.partidosSuspension} partido(s).`
+        : '';
+      await this.notificacionesService.notificarEquipo(equipoId, {
+        tipo: `sancion_${evento}`,
+        titulo: titulos[evento],
+        mensaje: `${acciones[evento]} ${tipo} para ${afectado}.${suspension}`,
+        ligaId: sancion.ligaId,
+        equipoId,
+        ruta: '/sanciones',
+        referenciaTipo: 'sancion',
+        referenciaId: sancion.id,
+        claveEvento: evento === 'actualizada'
+          ? `sancion:${sancion.id}:${evento}:${Date.now()}`
+          : `sancion:${sancion.id}:${evento}`,
+      });
+    } catch (error) {
+      const mensaje = error instanceof Error ? error.message : String(error);
+      this.logger.error(`No se pudo preparar la notificación de la sanción #${sancionId}: ${mensaje}`);
+    }
+  }
 
   /**
    * Una sancion individual conserva sancion.equipoId como dato historico y
@@ -365,6 +430,7 @@ export class SancionesService {
       await this.evaluarAcumulacion(sancionGuardada, usuario);
     }
 
+    await this.notificarSancion(sancionGuardada.id, 'registrada');
     return sancionGuardada;
   }
 
@@ -604,7 +670,9 @@ export class SancionesService {
       sancion.suspensionActiva = false;
     }
 
-    return this.sancionRepo.save(sancion);
+    const guardada = await this.sancionRepo.save(sancion);
+    await this.notificarSancion(guardada.id, 'actualizada');
+    return guardada;
   }
 
   /**
@@ -662,6 +730,7 @@ export class SancionesService {
 
     const nuevaGuardada = await this.sancionRepo.save(nueva) as Sancion;
     await this.excluirPartidosYaJugados(nuevaGuardada);
+    await this.notificarSancion(nuevaGuardada.id, 'resuelta');
     return nuevaGuardada;
   }
 
@@ -677,6 +746,7 @@ export class SancionesService {
     sancion.activo = false;
     sancion.suspensionActiva = false;
     await this.sancionRepo.save(sancion);
+    await this.notificarSancion(sancion.id, 'anulada');
     return { message: `Sanción #${id} anulada correctamente.` };
   }
 
@@ -822,6 +892,7 @@ export class SancionesService {
     original.suspensionActiva = false;
     await this.sancionRepo.save(original);
 
+    await this.notificarSancion(nuevaGuardada.id, 'resuelta');
     return nuevaGuardada;
   }
 

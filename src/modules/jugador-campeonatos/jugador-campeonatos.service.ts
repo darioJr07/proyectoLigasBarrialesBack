@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, Not, Repository } from 'typeorm';
 import { JugadorCampeonato } from './entities/jugador-campeonato.entity';
@@ -16,6 +16,7 @@ import { Sancion } from '../sanciones/entities/sancion.entity';
 import { CambiosDorsalService } from './cambios-dorsal.service';
 import { Gol } from '../goles/entities/gol.entity';
 import { RegularizarReingresoDto } from './dto/regularizar-reingreso.dto';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
 
 @Injectable()
 export class JugadorCampeonatosService {
@@ -40,7 +41,52 @@ export class JugadorCampeonatosService {
     private golRepo: Repository<Gol>,
     private dataSource: DataSource,
     private readonly cambiosDorsalService: CambiosDorsalService,
+    @Optional() private readonly notificacionesService?: NotificacionesService,
   ) {}
+
+  private async notificarSolicitud(
+    habilitacion: JugadorCampeonato,
+    campeonato: Campeonato,
+    equipo: Equipo,
+    jugador: Jugador,
+    usuario: any,
+  ): Promise<void> {
+    const fecha = habilitacion.fechaInscripcion
+      ? new Date(habilitacion.fechaInscripcion).getTime()
+      : Date.now();
+    await this.notificacionesService?.notificarAdministradoresLiga({
+      tipo: 'habilitacion_solicitada',
+      titulo: 'Nueva habilitación pendiente',
+      mensaje: `${equipo.nombre} solicitó la habilitación de ${jugador.nombre}.`,
+      ligaId: campeonato.ligaId,
+      equipoId: equipo.id,
+      ruta: '/jugador-campeonatos/pendientes',
+      referenciaTipo: 'jugador_campeonato',
+      referenciaId: habilitacion.id,
+      claveEvento: `habilitacion:${habilitacion.id}:solicitud:${fecha}`,
+      excluirUsuarioId: usuario?.userId ?? usuario?.id,
+    });
+  }
+
+  private async notificarResultado(
+    habilitacion: JugadorCampeonato,
+    estado: 'aprobada' | 'rechazada',
+  ): Promise<void> {
+    const fecha = habilitacion.fechaAprobacion
+      ? new Date(habilitacion.fechaAprobacion).getTime()
+      : Date.now();
+    await this.notificacionesService?.notificarEquipo(habilitacion.equipoId, {
+      tipo: `habilitacion_${estado}`,
+      titulo: `Habilitación ${estado}`,
+      mensaje: `La habilitación de ${habilitacion.jugador?.nombre ?? 'un jugador'} fue ${estado}.`,
+      ligaId: habilitacion.campeonato?.ligaId ?? null,
+      equipoId: habilitacion.equipoId,
+      ruta: '/jugador-campeonatos',
+      referenciaTipo: 'jugador_campeonato',
+      referenciaId: habilitacion.id,
+      claveEvento: `habilitacion:${habilitacion.id}:${estado}:${fecha}`,
+    });
+  }
 
   private async assertCampeonatoAccess(campeonato: Campeonato, usuario: any): Promise<void> {
     if (usuario.role === 'master') return;
@@ -325,7 +371,11 @@ export class JugadorCampeonatosService {
           fechaInscripcion: new Date(),
         }
       );
-      return await this.jugadorCampeonatoRepo.findOne({ where: { id: solicitudRechazada.id } }) as JugadorCampeonato;
+      const reactivada = await this.jugadorCampeonatoRepo.findOne({
+        where: { id: solicitudRechazada.id },
+      }) as JugadorCampeonato;
+      await this.notificarSolicitud(reactivada, campeonato, equipo, jugador, usuario);
+      return reactivada;
     }
 
     // Si existe una habilitación de OTRO equipo (jugador transferido), dejarla como historial
@@ -366,7 +416,7 @@ export class JugadorCampeonatosService {
     }
 
     // 11. Crear nueva inscripción con estado pendiente
-    return this.dataSource.transaction(async (manager) => {
+    const creada = await this.dataSource.transaction(async (manager) => {
       const repo = manager.getRepository(JugadorCampeonato);
       if (inscripcionActiva && inscripcionActiva.equipoId !== dto.equipoId) {
         await repo.update(
@@ -390,6 +440,8 @@ export class JugadorCampeonatosService {
       });
       return repo.save(jugadorCampeonato);
     });
+    await this.notificarSolicitud(creada, campeonato, equipo, jugador, usuario);
+    return creada;
   }
 
   async findAll(usuario: any): Promise<JugadorCampeonato[]> {
@@ -727,7 +779,9 @@ export class JugadorCampeonatosService {
       jugadorCampeonato.observaciones = dto.observaciones;
     }
 
-    return await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
+    const guardada = await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
+    await this.notificarResultado(guardada, 'aprobada');
+    return guardada;
   }
 
   /**
@@ -808,7 +862,9 @@ export class JugadorCampeonatosService {
     jugadorCampeonato.fechaAprobacion = new Date();
     jugadorCampeonato.observaciones = dto.observaciones;
 
-    return await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
+    const guardada = await this.jugadorCampeonatoRepo.save(jugadorCampeonato);
+    await this.notificarResultado(guardada, 'rechazada');
+    return guardada;
   }
 
   async findPendientes(usuario: any): Promise<JugadorCampeonato[]> {

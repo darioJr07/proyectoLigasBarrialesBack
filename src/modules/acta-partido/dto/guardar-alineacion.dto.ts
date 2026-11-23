@@ -1,5 +1,13 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsOptional, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+  ValidateNested,
+} from 'class-validator';
 import { ActaAlineacionJugadorDto } from './acta-alineacion-jugador.dto';
 
 /**
@@ -11,6 +19,13 @@ export class GuardarAlineacionDto {
   @IsBoolean()
   @IsOptional()
   permitirCorreccion?: boolean;
+
+  /** Motivo obligatorio al corregir la plantilla de un partido jugado. */
+  @IsString()
+  @MinLength(5)
+  @MaxLength(500)
+  @IsOptional()
+  motivoCorreccion?: string;
 
   @IsArray()
   @IsOptional()

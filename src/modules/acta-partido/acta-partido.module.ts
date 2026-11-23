@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ActaAlineacion } from './entities/acta-alineacion.entity';
+import { ActaAlineacionHistorial } from './entities/acta-alineacion-historial.entity';
 import { ActaInformePartido } from './entities/acta-informe-partido.entity';
 import { ActaIncidencia } from './entities/acta-incidencia.entity';
 import { ActaPartidoService } from './acta-partido.service';
@@ -18,6 +19,7 @@ import { JugadorCampeonatosModule } from '../jugador-campeonatos/jugador-campeon
     JugadorCampeonatosModule,
     TypeOrmModule.forFeature([
       ActaAlineacion,
+      ActaAlineacionHistorial,
       ActaInformePartido,
       ActaIncidencia,
       Partido,

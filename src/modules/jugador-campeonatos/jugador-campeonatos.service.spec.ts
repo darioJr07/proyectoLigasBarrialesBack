@@ -14,6 +14,7 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
   let golRepo: Record<string, jest.Mock>;
   let dataSource: { transaction: jest.Mock };
   let cambiosDorsalService: Record<string, jest.Mock>;
+  let notificacionesService: Record<string, jest.Mock>;
 
   beforeEach(() => {
     habilitacionRepo = {
@@ -37,6 +38,10 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
       adjuntarCambiosActivos: jest.fn(async (items: any[]) => items),
       validarDorsalParaHabilitacion: jest.fn().mockResolvedValue(undefined),
     };
+    notificacionesService = {
+      notificarAdministradoresLiga: jest.fn().mockResolvedValue(1),
+      notificarEquipo: jest.fn().mockResolvedValue(1),
+    };
 
     service = new JugadorCampeonatosService(
       habilitacionRepo as any,
@@ -50,6 +55,7 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
       golRepo as any,
       dataSource as any,
       cambiosDorsalService as any,
+      notificacionesService as any,
     );
   });
 
@@ -124,6 +130,14 @@ describe('JugadorCampeonatosService - ciclo de habilitaciones', () => {
     expect(habilitacionRepo.create).not.toHaveBeenCalled();
     expect(cambiosDorsalService.validarDorsalParaHabilitacion).toHaveBeenCalledWith(
       expect.objectContaining({ numeroCancha: 12, excluirHabilitacionId: 77 }),
+    );
+    expect(notificacionesService.notificarAdministradoresLiga).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tipo: 'habilitacion_solicitada',
+        ligaId: 1,
+        equipoId: 10,
+        referenciaId: 77,
+      }),
     );
     expect(result).toEqual(reactivada);
   });

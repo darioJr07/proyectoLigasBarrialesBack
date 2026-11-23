@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { ActaAlineacion } from './entities/acta-alineacion.entity';
+import { ActaAlineacionHistorial } from './entities/acta-alineacion-historial.entity';
 import { ActaInformePartido } from './entities/acta-informe-partido.entity';
 import { ActaIncidencia } from './entities/acta-incidencia.entity';
 import { GuardarAlineacionDto } from './dto/guardar-alineacion.dto';
@@ -19,6 +20,7 @@ import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { SancionPartidoExcluido } from '../sanciones/entities/sancion-partido-excluido.entity';
 import { VocaliaPartido } from '../partidos/entities/vocalia-partido.entity';
 import { CambiosDorsalService } from '../jugador-campeonatos/cambios-dorsal.service';
+import { ActaAlineacionJugadorDto } from './dto/acta-alineacion-jugador.dto';
 
 @Injectable()
 export class ActaPartidoService {
@@ -161,28 +163,43 @@ export class ActaPartidoService {
 
     this.validarAcceso(partido, usuario);
 
+    this.validarPermisoEdicion(usuario);
+
+    const anteriores = await this.actaRepo.find({
+      where: { partidoId, activo: true },
+      order: { equipoId: 'ASC', id: 'ASC' },
+    });
+    const jugadores = dto.jugadores ?? [];
+
     if (partido.estado === 'jugado' && dto.permitirCorreccion !== true) {
       throw new BadRequestException(
         'La plantilla está cerrada porque el partido ya fue jugado. Desbloquee la corrección de forma explícita antes de guardarla.',
       );
     }
 
-    if (!dto.jugadores || dto.jugadores.length === 0) {
-      // Eliminar alineación previa solo al confirmar el guardado vacío.
-      await this.actaRepo.delete({ partidoId });
-      return [];
+    const motivoCorreccion = dto.motivoCorreccion?.trim() ?? '';
+    if (partido.estado === 'jugado' && motivoCorreccion.length < 5) {
+      throw new BadRequestException(
+        'Debe indicar un motivo de al menos 5 caracteres para corregir la plantilla de un partido jugado.',
+      );
+    }
+
+    if (jugadores.length > 0) {
+      await this.validarJugadoresAlineacion(partido, jugadores, anteriores);
     }
 
     // Validar que ningún jugador sancionado venga marcado como jugó/expulsado
-    const jugadorIdsEnPlanilla = dto.jugadores.map((j) => j.jugadorId);
-    const sancionesActivas = await this.sancionRepo.find({
-      where: {
-        jugadorId: In(jugadorIdsEnPlanilla),
-        campeonatoId: partido.campeonatoId,
-        suspensionActiva: true,
-        activo: true,
-      },
-    });
+    const jugadorIdsEnPlanilla = jugadores.map((j) => j.jugadorId);
+    const sancionesActivas = jugadorIdsEnPlanilla.length
+      ? await this.sancionRepo.find({
+          where: {
+            jugadorId: In(jugadorIdsEnPlanilla),
+            campeonatoId: partido.campeonatoId,
+            suspensionActiva: true,
+            activo: true,
+          },
+        })
+      : [];
     // Una sanción creada después de este partido no debe bloquear la edición de
     // su planilla histórica: queda registrada como exclusión al crear la sanción.
     const exclusiones = sancionesActivas.length
@@ -195,7 +212,7 @@ export class ActaPartidoService {
         .filter((s) => this.sancionTemporalVigente(s) && !exclusiones.some((e) => e.sancionId === s.id))
         .map((s) => s.jugadorId),
     );
-    const infractores = dto.jugadores.filter(
+    const infractores = jugadores.filter(
       (j) => idsSancionados.has(j.jugadorId) && (j.estado === 'jugo' || j.estado === 'expulsado'),
     );
     if (infractores.length > 0) {
@@ -204,10 +221,7 @@ export class ActaPartidoService {
       );
     }
 
-    // Eliminar alineación previa únicamente después de validar la nueva.
-    await this.actaRepo.delete({ partidoId });
-
-    const registros = dto.jugadores.map((j) => {
+    const registros = jugadores.map((j) => {
       const r = new ActaAlineacion();
       r.partidoId = partidoId;
       r.campeonatoId = partido.campeonatoId;
@@ -219,7 +233,99 @@ export class ActaPartidoService {
       return r;
     });
 
-    return await this.actaRepo.save(registros);
+    // El reemplazo y su auditoría forman una sola operación: si algo falla,
+    // la alineación anterior no se pierde.
+    return this.actaRepo.manager.transaction(async (manager) => {
+      const actaRepo = manager.getRepository(ActaAlineacion);
+      await actaRepo.delete({ partidoId });
+      const guardados = registros.length > 0 ? await actaRepo.save(registros) : [];
+
+      if (partido.estado === 'jugado') {
+        const historialRepo = manager.getRepository(ActaAlineacionHistorial);
+        await historialRepo.save(historialRepo.create({
+          partidoId,
+          campeonatoId: partido.campeonatoId,
+          usuarioId: usuario.userId ?? usuario.id ?? usuario.sub ?? null,
+          motivo: motivoCorreccion,
+          alineacionAnterior: this.crearSnapshotAlineacion(anteriores),
+          alineacionNueva: this.crearSnapshotAlineacion(guardados),
+        }));
+      }
+
+      return guardados;
+    });
+  }
+
+  private async validarJugadoresAlineacion(
+    partido: Partido,
+    jugadores: ActaAlineacionJugadorDto[],
+    anteriores: ActaAlineacion[],
+  ): Promise<void> {
+    const ids = jugadores.map((jugador) => jugador.jugadorId);
+    const duplicados = [...new Set(ids.filter((id, indice) => ids.indexOf(id) !== indice))];
+    if (duplicados.length > 0) {
+      throw new BadRequestException(
+        `La plantilla contiene jugadores duplicados: IDs ${duplicados.join(', ')}.`,
+      );
+    }
+
+    const equiposPermitidos = new Set([partido.equipoLocalId, partido.equipoVisitanteId]);
+    const equiposInvalidos = jugadores.filter((jugador) => !equiposPermitidos.has(jugador.equipoId));
+    if (equiposInvalidos.length > 0) {
+      throw new BadRequestException(
+        `Hay jugadores asociados a equipos que no participan en el partido: IDs ${equiposInvalidos.map((j) => j.jugadorId).join(', ')}.`,
+      );
+    }
+
+    const habilitaciones = await this.jugadorCampeonatoRepo.find({
+      where: {
+        campeonatoId: partido.campeonatoId,
+        categoriaId: partido.categoriaId,
+        jugadorId: In(ids),
+        equipoId: In([...equiposPermitidos]),
+      },
+    });
+
+    const invalidos = jugadores.filter((jugador) => {
+      const habilitadoActual = habilitaciones.some(
+        (registro) =>
+          registro.jugadorId === jugador.jugadorId &&
+          registro.equipoId === jugador.equipoId &&
+          registro.estado === 'habilitado' &&
+          registro.activo,
+      );
+      const yaConstabaEnPlanilla = anteriores.some(
+        (registro) =>
+          registro.jugadorId === jugador.jugadorId && registro.equipoId === jugador.equipoId,
+      );
+      return !habilitadoActual && !yaConstabaEnPlanilla;
+    });
+
+    if (invalidos.length > 0) {
+      throw new BadRequestException(
+        `Los siguientes jugadores no tienen una habilitación vigente para el equipo, campeonato y categoría del partido: IDs ${invalidos.map((j) => j.jugadorId).join(', ')}.`,
+      );
+    }
+  }
+
+  private crearSnapshotAlineacion(
+    registros: Array<{
+      jugadorId: number;
+      equipoId: number;
+      estado?: string;
+      numeroCancha?: number | null;
+      observaciones?: string | null;
+      activo?: boolean;
+    }>,
+  ): Record<string, unknown>[] {
+    return registros.map((registro) => ({
+      jugadorId: registro.jugadorId,
+      equipoId: registro.equipoId,
+      estado: registro.estado ?? 'jugo',
+      numeroCancha: registro.numeroCancha ?? null,
+      observaciones: registro.observaciones ?? null,
+      activo: registro.activo ?? true,
+    }));
   }
 
   /**
@@ -288,6 +394,7 @@ export class ActaPartidoService {
     const partido = await this.partidoRepo.findOne({ where: { id: partidoId } });
     if (!partido) throw new NotFoundException('Partido no encontrado');
     this.validarAcceso(partido, usuario);
+    this.validarPermisoEdicion(usuario);
 
     // Upsert del informe general (uno por partido)
     let informe = await this.informeRepo.findOne({ where: { partidoId } });
@@ -506,18 +613,32 @@ export class ActaPartidoService {
   // ── Permisos ──────────────────────────────────────────────────────────────
 
   private validarAcceso(partido: Partido, usuario: any): void {
-    if (usuario.role === 'directivo_liga') {
-      if (partido.campeonato?.ligaId !== usuario.ligaId) {
+    if (usuario.role === 'master') return;
+
+    if (['directivo_liga', 'tribuna_penas', 'tesoreria'].includes(usuario.role)) {
+      if (Number(partido.campeonato?.ligaId) !== Number(usuario.ligaId)) {
         throw new ForbiddenException('No tienes permisos sobre este partido');
       }
-    } else if (usuario.role === 'dirigente_equipo') {
+      return;
+    }
+
+    if (usuario.role === 'dirigente_equipo') {
       // El dirigente solo puede ver el acta de partidos donde juega su equipo
       if (
-        partido.equipoLocalId !== usuario.equipoId &&
-        partido.equipoVisitanteId !== usuario.equipoId
+        Number(partido.equipoLocalId) !== Number(usuario.equipoId) &&
+        Number(partido.equipoVisitanteId) !== Number(usuario.equipoId)
       ) {
         throw new ForbiddenException('No tienes permisos para ver este partido');
       }
+      return;
+    }
+
+    throw new ForbiddenException('No tienes permisos para acceder al acta de este partido');
+  }
+
+  private validarPermisoEdicion(usuario: any): void {
+    if (!['master', 'directivo_liga'].includes(usuario?.role)) {
+      throw new ForbiddenException('Solo master o directivo_liga pueden modificar el acta del partido.');
     }
   }
 }

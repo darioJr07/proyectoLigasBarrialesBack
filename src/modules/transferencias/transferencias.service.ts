@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { Injectable, BadRequestException, ForbiddenException, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { Transferencia } from './entities/transferencia.entity';
@@ -10,6 +10,7 @@ import { Campeonato } from '../campeonatos/entities/campeonato.entity';
 import { Equipo } from '../equipos/entities/equipo.entity';
 import { JugadorCampeonato } from '../jugador-campeonatos/entities/jugador-campeonato.entity';
 import { Inscripcion } from '../inscripciones/entities/inscripcion.entity';
+import { NotificacionesService } from '../notificaciones/notificaciones.service';
 
 @Injectable()
 export class TransferenciasService {
@@ -27,7 +28,69 @@ export class TransferenciasService {
     @InjectRepository(Inscripcion)
     private inscripcionRepo: Repository<Inscripcion>,
     private dataSource: DataSource,
+    @Optional() private readonly notificacionesService?: NotificacionesService,
   ) {}
+
+  private nombreJugador(transferencia: Transferencia): string {
+    return transferencia.jugador?.nombre ?? 'el jugador solicitado';
+  }
+
+  private async notificarSolicitud(
+    transferencia: Transferencia,
+    usuario: any,
+  ): Promise<void> {
+    await this.notificacionesService?.notificarEquipo(transferencia.equipoOrigenId, {
+      tipo: 'transferencia_solicitada',
+      titulo: 'Transferencia pendiente de respuesta',
+      mensaje: `${transferencia.equipoDestino?.nombre ?? 'Otro equipo'} solicitó la transferencia de ${this.nombreJugador(transferencia)}.`,
+      ligaId: transferencia.campeonato?.ligaId ?? null,
+      equipoId: transferencia.equipoOrigenId,
+      ruta: '/transferencias/pendientes-origen',
+      referenciaTipo: 'transferencia',
+      referenciaId: transferencia.id,
+      claveEvento: `transferencia:${transferencia.id}:solicitud`,
+      excluirUsuarioId: usuario?.userId ?? usuario?.id,
+    });
+  }
+
+  private async notificarPendienteDirectivo(
+    transferencia: Transferencia,
+    usuario: any,
+  ): Promise<void> {
+    await this.notificacionesService?.notificarAdministradoresLiga({
+      tipo: 'transferencia_pendiente_directivo',
+      titulo: 'Transferencia pendiente de aprobación',
+      mensaje: `${transferencia.equipoOrigen?.nombre ?? 'El equipo origen'} aprobó el pase de ${this.nombreJugador(transferencia)} hacia ${transferencia.equipoDestino?.nombre ?? 'el equipo destino'}.`,
+      ligaId: transferencia.campeonato?.ligaId ?? null,
+      ruta: '/transferencias/pendientes-directivo',
+      referenciaTipo: 'transferencia',
+      referenciaId: transferencia.id,
+      claveEvento: `transferencia:${transferencia.id}:pendiente-directivo`,
+      excluirUsuarioId: usuario?.userId ?? usuario?.id,
+    });
+  }
+
+  private async notificarResultado(
+    transferencia: Transferencia,
+    estado: 'completada' | 'rechazada_origen' | 'rechazada_directivo',
+  ): Promise<void> {
+    const rechazada = estado !== 'completada';
+    await this.notificacionesService?.notificarEquipos(
+      [transferencia.equipoOrigenId, transferencia.equipoDestinoId],
+      {
+        tipo: `transferencia_${estado}`,
+        titulo: rechazada ? 'Transferencia rechazada' : 'Transferencia completada',
+        mensaje: rechazada
+          ? `La transferencia de ${this.nombreJugador(transferencia)} fue rechazada.`
+          : `La transferencia de ${this.nombreJugador(transferencia)} hacia ${transferencia.equipoDestino?.nombre ?? 'el equipo destino'} fue completada.`,
+        ligaId: transferencia.campeonato?.ligaId ?? null,
+        ruta: '/transferencias',
+        referenciaTipo: 'transferencia',
+        referenciaId: transferencia.id,
+        claveEvento: `transferencia:${transferencia.id}:${estado}`,
+      },
+    );
+  }
 
   private async assertCampeonatoAccess(campeonato: Campeonato, usuario: any): Promise<void> {
     if (usuario.role === 'master') return;
@@ -225,6 +288,8 @@ export class TransferenciasService {
       result.advertencia = `⚠️ Atención: Este jugador ya está ${estadoTexto} en el equipo "${habilitacionActiva.equipo?.nombre || 'otro equipo'}" para este campeonato. Si la transferencia es aprobada por ambas partes, será dado de baja automáticamente en ese equipo.`;
     }
 
+    await this.notificarSolicitud(loaded, usuario);
+
     return result;
   }
 
@@ -299,6 +364,11 @@ export class TransferenciasService {
     if (!loaded) {
       throw new NotFoundException('Error al cargar la transferencia');
     }
+    if (loaded.estadoDirectivo === 'aprobado') {
+      await this.notificarResultado(loaded, 'completada');
+    } else {
+      await this.notificarPendienteDirectivo(loaded, usuario);
+    }
     return this.serializeTransferencia(loaded);
   }
 
@@ -336,6 +406,7 @@ export class TransferenciasService {
     if (!loaded) {
       throw new NotFoundException('Error al cargar la transferencia');
     }
+    await this.notificarResultado(loaded, 'rechazada_origen');
     return this.serializeTransferencia(loaded);
   }
 
@@ -406,6 +477,9 @@ export class TransferenciasService {
     if (!loaded) {
       throw new NotFoundException('Error al cargar la transferencia');
     }
+    if (loaded.estadoEquipoOrigen === 'aprobado') {
+      await this.notificarResultado(loaded, 'completada');
+    }
     return this.serializeTransferencia(loaded);
   }
 
@@ -448,6 +522,7 @@ export class TransferenciasService {
     if (!loaded) {
       throw new NotFoundException('Error al cargar la transferencia');
     }
+    await this.notificarResultado(loaded, 'rechazada_directivo');
     return this.serializeTransferencia(loaded);
   }
 
@@ -488,6 +563,7 @@ export class TransferenciasService {
     jugador.equipoId = transferencia.equipoDestinoId;
     await jugadorRepo.save(jugador);
 
+    const fechaBaja = new Date();
     await habilitacionRepo.update(
       {
         jugadorId: transferencia.jugadorId,
@@ -498,6 +574,8 @@ export class TransferenciasService {
       {
         activo: false,
         estado: 'baja',
+        fechaBaja,
+        motivoBaja: 'Baja automatica por transferencia aprobada',
         observaciones: 'Baja automatica por transferencia aprobada',
       },
     );
@@ -526,7 +604,13 @@ export class TransferenciasService {
         equipoId: transferencia.equipoOrigenId,
         activo: true,
       },
-      { activo: false, estado: 'baja' },
+      {
+        activo: false,
+        estado: 'baja',
+        fechaBaja: new Date(),
+        motivoBaja: 'Baja automatica por transferencia aprobada',
+        observaciones: 'Baja automatica por transferencia aprobada',
+      },
     );
     console.log(`✓ Ficha de habilitación del equipo origen marcada como baja e inactiva (si existía)`);
 

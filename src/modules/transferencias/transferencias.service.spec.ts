@@ -14,6 +14,7 @@ describe('TransferenciasService - reglas criticas', () => {
   let habilitacionRepo: Record<string, jest.Mock>;
   let inscripcionRepo: Record<string, jest.Mock>;
   let dataSource: { transaction: jest.Mock };
+  let notificacionesService: Record<string, jest.Mock>;
 
   beforeEach(() => {
     transferenciaRepo = {
@@ -28,6 +29,11 @@ describe('TransferenciasService - reglas criticas', () => {
     habilitacionRepo = { findOne: jest.fn(), update: jest.fn() };
     inscripcionRepo = { findOne: jest.fn() };
     dataSource = { transaction: jest.fn() };
+    notificacionesService = {
+      notificarEquipo: jest.fn().mockResolvedValue(1),
+      notificarEquipos: jest.fn().mockResolvedValue(2),
+      notificarAdministradoresLiga: jest.fn().mockResolvedValue(1),
+    };
 
     service = new TransferenciasService(
       transferenciaRepo as any,
@@ -37,6 +43,7 @@ describe('TransferenciasService - reglas criticas', () => {
       habilitacionRepo as any,
       inscripcionRepo as any,
       dataSource as any,
+      notificacionesService as any,
     );
   });
 
@@ -127,7 +134,19 @@ describe('TransferenciasService - reglas criticas', () => {
         equipoId: 10,
         activo: true,
       }),
-      expect.objectContaining({ activo: false, estado: 'baja' }),
+      expect.objectContaining({
+        activo: false,
+        estado: 'baja',
+        fechaBaja: expect.any(Date),
+        motivoBaja: 'Baja automatica por transferencia aprobada',
+      }),
+    );
+    expect(notificacionesService.notificarEquipos).toHaveBeenCalledWith(
+      [10, 20],
+      expect.objectContaining({
+        tipo: 'transferencia_completada',
+        referenciaId: 90,
+      }),
     );
   });
 
@@ -166,6 +185,13 @@ describe('TransferenciasService - reglas criticas', () => {
       }),
     );
     expect(result).toEqual(expect.objectContaining({ id: 91, activo: true }));
+    expect(notificacionesService.notificarEquipos).toHaveBeenCalledWith(
+      [10, 20],
+      expect.objectContaining({
+        tipo: 'transferencia_rechazada_origen',
+        referenciaId: 91,
+      }),
+    );
   });
 
   it('revierte la aprobacion final si el equipo destino ya no esta inscrito', async () => {
